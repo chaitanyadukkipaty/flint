@@ -1,19 +1,21 @@
 # flint
 
-Hybrid browser automation for Claude Code. Record browser flows with an LLM and a human acting on the same live browser simultaneously, replay them with automatic LLM self-healing when locators break, and extract resilient CSS/XPath locators on demand.
+Hybrid browser automation for Claude Code and VS Code Copilot. Record browser flows with an LLM and a human acting on the same live browser simultaneously, replay them with automatic LLM self-healing when locators break, and extract resilient CSS/XPath locators on demand.
 
 ## Features
 
 - **Hybrid recording** — LLM (via Playwright MCP) and user act on the same live browser at the same time; every action from both sides is saved to a YAML flow file
 - **LLM self-healing replay** — when a locator breaks during replay, `flint` calls `claude --print` to inspect the live DOM and find an alternative selector, retries the step, and writes the fix back to the YAML
 - **Resilient locators** — CSS + XPath generated with a priority-based scoring system (`data-testid` → `aria-label` → stable id → label → name → placeholder → type → class → position)
-- **Claude Code skills** — `/browser` and `/browser-replay` skills included; install them with `flint init`
+- **Claude Code skills** — `/browser` and `/browser-replay` skills included; install with `flint init`
+- **VS Code Copilot** — MCP server auto-configured in `.vscode/mcp.json`; workspace instructions written to `.github/copilot-instructions.md`
 
 ## Requirements
 
 - Node 18+
-- [Claude Code](https://claude.ai/code) CLI installed and authenticated
 - Playwright browsers: `npx playwright install chromium`
+- **Claude Code** — [install](https://claude.ai/code), authenticated, for `/browser` skills and self-healing replay
+- **VS Code + GitHub Copilot** — VS Code 1.99+ with Copilot Chat extension
 
 ## Installation
 
@@ -31,15 +33,25 @@ Run once per project:
 flint init
 ```
 
-This:
-1. Copies `/browser` and `/browser-replay` Claude Code skills into `.claude/skills/`
-2. Writes `.mcp.json` pointing to the Playwright MCP server
-3. Creates the `flows/` directory
+This creates:
+- `.claude/skills/` — `/browser` and `/browser-replay` skills for Claude Code
+- `.mcp.json` — Playwright MCP config for Claude Code
+- `.vscode/mcp.json` — Playwright MCP config for VS Code Copilot
+- `.github/copilot-instructions.md` — browser tool usage instructions for Copilot
+- `flows/` — directory for recorded flows
 
-Then in Claude Code, reconnect the MCP server:
+### Claude Code
+Reconnect after `flint session` starts:
 ```
 /mcp → Reconnect playwright
 ```
+
+### VS Code Copilot
+After `flint session` starts, restart the MCP server:
+```
+Ctrl+Shift+P → "MCP: Restart Server" → playwright
+```
+Then use Copilot Chat with the browser tools directly — no slash commands needed, just natural language.
 
 ## Usage
 

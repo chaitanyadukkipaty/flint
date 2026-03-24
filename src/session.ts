@@ -21,6 +21,7 @@ import { generateLocators, formatLocators } from './pom-generator';
 const FLOW_DIR = path.join(process.cwd(), 'flows');
 const SCREENSHOT_DIR = path.join(FLOW_DIR, 'screenshots');
 const MCP_JSON = path.join(process.cwd(), '.mcp.json');
+const VSCODE_MCP_JSON = path.join(process.cwd(), '.vscode', 'mcp.json');
 
 // Shell wrapper that sources nvm and runs @playwright/mcp under Node 18+
 // __dirname resolves correctly whether run via ts-node (src/) or compiled (dist/)
@@ -28,29 +29,35 @@ const MCP_WRAPPER = path.join(__dirname, '..', 'bin', 'playwright-mcp.sh');
 
 const DEFAULT_MCP = {
   mcpServers: {
-    playwright: {
-      type: 'stdio',
-      command: MCP_WRAPPER,
-      args: ['--headed'],
-    },
+    playwright: { type: 'stdio', command: MCP_WRAPPER, args: ['--headed'] },
+  },
+};
+
+const DEFAULT_VSCODE_MCP = {
+  servers: {
+    playwright: { type: 'stdio', command: MCP_WRAPPER, args: ['--headed'] },
   },
 };
 
 function writeMcpJson(cdpEndpoint: string) {
-  const config = {
-    mcpServers: {
-      playwright: {
-        type: 'stdio',
-        command: MCP_WRAPPER,
-        args: ['--cdp-endpoint', cdpEndpoint],
-      },
-    },
-  };
-  fs.writeFileSync(MCP_JSON, JSON.stringify(config, null, 2) + '\n');
+  const args = ['--cdp-endpoint', cdpEndpoint];
+  // Claude Code (.mcp.json)
+  fs.writeFileSync(MCP_JSON, JSON.stringify(
+    { mcpServers: { playwright: { type: 'stdio', command: MCP_WRAPPER, args } } },
+    null, 2) + '\n');
+  // VS Code Copilot (.vscode/mcp.json)
+  if (fs.existsSync(VSCODE_MCP_JSON)) {
+    fs.writeFileSync(VSCODE_MCP_JSON, JSON.stringify(
+      { servers: { playwright: { type: 'stdio', command: MCP_WRAPPER, args } } },
+      null, 2) + '\n');
+  }
 }
 
 function restoreMcpJson() {
   fs.writeFileSync(MCP_JSON, JSON.stringify(DEFAULT_MCP, null, 2) + '\n');
+  if (fs.existsSync(VSCODE_MCP_JSON)) {
+    fs.writeFileSync(VSCODE_MCP_JSON, JSON.stringify(DEFAULT_VSCODE_MCP, null, 2) + '\n');
+  }
 }
 
 /** Fetch the Chrome WS debugger URL from the CDP HTTP endpoint */
