@@ -11,6 +11,7 @@ exports.healStep = healStep;
  *   2. Anthropic API  (`ANTHROPIC_API_KEY`) — works with VS Code Copilot or any env
  */
 const child_process_1 = require("child_process");
+const init_1 = require("./init");
 const HEAL_SCHEMA = JSON.stringify({
     type: 'object',
     properties: {
@@ -164,10 +165,11 @@ async function healWithAnthropicApi(prompt) {
 /**
  * Ask an LLM for an alternative locator when a step fails.
  *
- * Strategy order:
- *   1. Claude Code CLI  — `claude --print`   (Claude Code users, no key needed)
- *   2. GitHub Models    — `gh auth token`     (GitHub / VS Code Copilot users, no key needed)
- *   3. Anthropic API    — ANTHROPIC_API_KEY   (explicit API key fallback)
+ * Strategy order is determined by .flint.json (set via `flint init`):
+ *   claude  → Claude CLI first,   then GitHub Models, then Anthropic API
+ *   copilot → GitHub Models first, then Anthropic API, then Claude CLI
+ *   both    → Claude CLI first,   then GitHub Models, then Anthropic API
+ *   (none)  → same as both
  */
 async function healStep(page, step, error) {
     if (!step.element)
@@ -184,24 +186,29 @@ async function healStep(page, step, error) {
         return null;
     }
     const prompt = buildPrompt(step, error, page.url(), elements);
-    // 1. Claude Code CLI
-    const cliResult = healWithClaudeCli(prompt);
-    if (cliResult)
-        return cliResult;
-    // 2. GitHub Models API (Copilot / any GitHub-authenticated user)
-    console.log('  ℹ claude CLI unavailable — trying GitHub Models (gh auth token)...');
-    const ghResult = await healWithGitHubModels(prompt);
-    if (ghResult)
-        return ghResult;
-    // 3. Anthropic API
-    if (process.env.ANTHROPIC_API_KEY) {
-        console.log('  ℹ GitHub Models unavailable — using Anthropic API...');
-        const apiResult = await healWithAnthropicApi(prompt);
-        if (apiResult)
-            return apiResult;
+    const config = (0, init_1.loadConfig)();
+    const assistant = config?.assistant ?? 'both';
+    // Define strategy lists per preference
+    const strategies = assistant === 'copilot'
+        ? [
+            { name: 'GitHub Models (gh auth token)', fn: () => healWithGitHubModels(prompt) },
+            { name: 'Anthropic API (ANTHROPIC_API_KEY)', fn: () => healWithAnthropicApi(prompt) },
+            { name: 'Claude Code CLI', fn: async () => healWithClaudeCli(prompt) },
+        ]
+        : [
+            { name: 'Claude Code CLI', fn: async () => healWithClaudeCli(prompt) },
+            { name: 'GitHub Models (gh auth token)', fn: () => healWithGitHubModels(prompt) },
+            { name: 'Anthropic API (ANTHROPIC_API_KEY)', fn: () => healWithAnthropicApi(prompt) },
+        ];
+    for (const { name, fn } of strategies) {
+        const result = await fn();
+        if (result) {
+            console.log(`  ✓ Healed via ${name}`);
+            return result;
+        }
     }
     console.warn('  ⚠ All healing strategies failed. To enable healing:');
-    console.warn('    - Claude Code: install claude CLI and authenticate');
+    console.warn('    - Claude Code: install and authenticate the claude CLI');
     console.warn('    - VS Code Copilot: run `gh auth login`');
     console.warn('    - Any env: set ANTHROPIC_API_KEY');
     return null;

@@ -1,10 +1,19 @@
 /**
  * init.ts — one-time project setup for flint.
- * Sets up Claude Code skills, VS Code Copilot MCP config, and Copilot instructions.
+ * Asks which AI assistant the user is using and configures accordingly.
  * Run: flint init
  */
 import * as fs from 'fs';
 import * as path from 'path';
+import * as readline from 'readline';
+
+export type Assistant = 'claude' | 'copilot' | 'both';
+
+export interface FlintConfig {
+  assistant: Assistant;
+}
+
+const CONFIG_FILE = '.flint.json';
 
 const COPILOT_INSTRUCTIONS = `## Browser Automation (flint)
 
@@ -45,8 +54,12 @@ Outputs CSS + XPath for all interactive elements with resilience scores.
 \`\`\`
 flint replay flows/<name>.yaml
 \`\`\`
-Failed locators are automatically healed using the Claude CLI and saved back to the YAML.
+Failed locators are automatically healed and saved back to the YAML.
 `;
+
+function ask(rl: readline.Interface, question: string): Promise<string> {
+  return new Promise(resolve => rl.question(question, resolve));
+}
 
 function copyDir(src: string, dest: string) {
   fs.mkdirSync(dest, { recursive: true });
@@ -62,62 +75,98 @@ function writeIfAbsent(filePath: string, content: string, label: string) {
   if (!fs.existsSync(filePath)) {
     fs.mkdirSync(path.dirname(filePath), { recursive: true });
     fs.writeFileSync(filePath, content);
-    console.log(`✅ ${label} → ${filePath}`);
+    console.log(`  ✅ ${label}`);
   } else {
-    console.log(`ℹ  ${label} already exists — not overwritten`);
+    console.log(`  ℹ  ${label} — already exists, skipped`);
   }
 }
 
-function init() {
+export function loadConfig(cwd: string = process.cwd()): FlintConfig | null {
+  const p = path.join(cwd, CONFIG_FILE);
+  try {
+    return JSON.parse(fs.readFileSync(p, 'utf8')) as FlintConfig;
+  } catch {
+    return null;
+  }
+}
+
+async function init() {
   const cwd = process.cwd();
   const mcpWrapper = path.join(__dirname, '..', 'bin', 'playwright-mcp.sh');
   const mcpEntry = { type: 'stdio', command: mcpWrapper, args: ['--headed'] };
 
-  // 1. Claude Code skills
-  const skillsSrc = path.join(__dirname, '..', 'skills');
-  if (fs.existsSync(skillsSrc)) {
-    copyDir(skillsSrc, path.join(cwd, '.claude', 'skills'));
-    console.log(`✅ Claude Code skills → .claude/skills/`);
+  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+
+  console.log('\n🔥 flint — hybrid browser automation\n');
+  console.log('Which AI assistant will you use?\n');
+  console.log('  1) Claude Code');
+  console.log('  2) VS Code Copilot');
+  console.log('  3) Both\n');
+
+  let choice: string;
+  while (true) {
+    choice = (await ask(rl, 'Enter 1, 2, or 3: ')).trim();
+    if (['1', '2', '3'].includes(choice)) break;
+    console.log('  Please enter 1, 2, or 3.');
   }
 
-  // 2. Claude Code MCP config (.mcp.json)
-  writeIfAbsent(
-    path.join(cwd, '.mcp.json'),
-    JSON.stringify({ mcpServers: { playwright: mcpEntry } }, null, 2) + '\n',
-    '.mcp.json (Claude Code)',
-  );
+  const assistant: Assistant = choice === '1' ? 'claude' : choice === '2' ? 'copilot' : 'both';
+  const useClaude  = assistant === 'claude'  || assistant === 'both';
+  const useCopilot = assistant === 'copilot' || assistant === 'both';
 
-  // 3. VS Code Copilot MCP config (.vscode/mcp.json)
-  writeIfAbsent(
-    path.join(cwd, '.vscode', 'mcp.json'),
-    JSON.stringify({ servers: { playwright: mcpEntry } }, null, 2) + '\n',
-    '.vscode/mcp.json (VS Code Copilot)',
-  );
+  rl.close();
 
-  // 4. GitHub Copilot workspace instructions
-  writeIfAbsent(
-    path.join(cwd, '.github', 'copilot-instructions.md'),
-    COPILOT_INSTRUCTIONS,
-    '.github/copilot-instructions.md',
-  );
+  console.log(`\nSetting up for: ${assistant === 'both' ? 'Claude Code + VS Code Copilot' : assistant === 'claude' ? 'Claude Code' : 'VS Code Copilot'}\n`);
 
-  // 5. flows directory
+  // Save config
+  fs.writeFileSync(path.join(cwd, CONFIG_FILE), JSON.stringify({ assistant }, null, 2) + '\n');
+  console.log(`  ✅ .flint.json (preference saved)`);
+
+  // Claude Code
+  if (useClaude) {
+    const skillsSrc = path.join(__dirname, '..', 'skills');
+    if (fs.existsSync(skillsSrc)) {
+      copyDir(skillsSrc, path.join(cwd, '.claude', 'skills'));
+      console.log(`  ✅ .claude/skills/ (browser + browser-replay skills)`);
+    }
+    writeIfAbsent(
+      path.join(cwd, '.mcp.json'),
+      JSON.stringify({ mcpServers: { playwright: mcpEntry } }, null, 2) + '\n',
+      '.mcp.json',
+    );
+  }
+
+  // VS Code Copilot
+  if (useCopilot) {
+    writeIfAbsent(
+      path.join(cwd, '.vscode', 'mcp.json'),
+      JSON.stringify({ servers: { playwright: mcpEntry } }, null, 2) + '\n',
+      '.vscode/mcp.json',
+    );
+    writeIfAbsent(
+      path.join(cwd, '.github', 'copilot-instructions.md'),
+      COPILOT_INSTRUCTIONS,
+      '.github/copilot-instructions.md',
+    );
+  }
+
+  // flows directory (always)
   fs.mkdirSync(path.join(cwd, 'flows', 'screenshots'), { recursive: true });
-  console.log(`✅ flows/ directory ready`);
+  console.log(`  ✅ flows/`);
 
-  console.log(`
-🚀 Setup complete!
-
-Claude Code:
-   flint session → /mcp → Reconnect playwright → /browser <task>
-
-VS Code Copilot:
-   flint session → Restart MCP server in VS Code → use Copilot Chat with browser tools
-
-Both:
-   flint replay flows/<name>.yaml   (self-healing replay)
-   flint pom <url>                  (CSS/XPath locators)
-`);
+  // Next steps
+  console.log('\n🚀 Setup complete!\n');
+  if (useClaude) {
+    console.log('Claude Code:');
+    console.log('  flint session → /mcp → Reconnect playwright → /browser <task>\n');
+  }
+  if (useCopilot) {
+    console.log('VS Code Copilot:');
+    console.log('  flint session → Ctrl+Shift+P → "MCP: Restart Server" → use Copilot Chat\n');
+  }
+  console.log('Both:');
+  console.log('  flint replay flows/<name>.yaml   (self-healing replay)');
+  console.log('  flint pom <url>                  (CSS/XPath locators)\n');
 }
 
-init();
+init().catch(err => { console.error(err); process.exit(1); });
