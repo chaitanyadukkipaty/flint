@@ -1,0 +1,9 @@
+node_modules/
+dist/
+flows/
+*.png
+*.tgz
+.env
+.mcp.json
+.playwright-mcp/
+.claude/settings.local.json

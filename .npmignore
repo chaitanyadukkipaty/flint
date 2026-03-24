@@ -1,0 +1,8 @@
+src/
+.claude/
+flows/
+screenshots/
+node_modules/
+*.yaml
+tsconfig.json
+.mcp.json

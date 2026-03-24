@@ -1,0 +1,45 @@
+{
+  "name": "flint",
+  "version": "1.0.0",
+  "description": "Hybrid browser automation: LLM + manual recording on a shared live browser, flow replay with LLM self-healing, and resilient CSS/XPath locator generation.",
+  "keywords": ["playwright", "browser-automation", "mcp", "claude", "testing", "flow-recording", "self-healing"],
+  "license": "MIT",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "bin": {
+    "flint": "bin/flint.js"
+  },
+  "files": [
+    "dist",
+    "bin",
+    "skills"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "prepublishOnly": "npm run build",
+    "session": "ts-node src/session.ts",
+    "replay": "ts-node src/flow-player.ts",
+    "pom": "ts-node src/pom-generator.ts"
+  },
+  "dependencies": {
+    "js-yaml": "^4.1.0",
+    "playwright": "^1.49.0"
+  },
+  "devDependencies": {
+    "@types/js-yaml": "^4.0.9",
+    "@types/node": "^22.0.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.7.0"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/chaitanyadukkipaty/flint.git"
+  },
+  "homepage": "https://github.com/chaitanyadukkipaty/flint#readme",
+  "bugs": {
+    "url": "https://github.com/chaitanyadukkipaty/flint/issues"
+  }
+}
