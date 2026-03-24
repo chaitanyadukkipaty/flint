@@ -12,6 +12,7 @@ import * as yaml from 'js-yaml';
 import * as path from 'path';
 import { FlowFile, FlowStep } from './flow-recorder';
 import { healStep } from './llm-healer';
+import { stealthArgs, applyStealthToContext } from './stealth';
 
 async function replay(flowPath: string) {
   if (!fs.existsSync(flowPath)) {
@@ -30,8 +31,14 @@ async function replay(flowPath: string) {
 
   console.log(`\nReplaying: ${flow.name} (${steps.length} steps, ${flow.steps.length - steps.length} duplicates skipped)\n`);
 
-  const browser = await chromium.launch({ headless: false, slowMo: 300 });
-  const context = await browser.newContext();
+  const browser = await chromium.launch({ headless: false, slowMo: 300, channel: 'chrome', args: stealthArgs() })
+    .catch(() => chromium.launch({ headless: false, slowMo: 300, args: stealthArgs() }));
+  const context = await browser.newContext({
+    userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+    viewport: { width: 1280, height: 800 },
+    locale: 'en-US',
+  });
+  await applyStealthToContext(context);
   const page = await context.newPage();
 
   let flowMutated = false;

@@ -47,6 +47,7 @@ const fs = __importStar(require("fs"));
 const yaml = __importStar(require("js-yaml"));
 const path = __importStar(require("path"));
 const llm_healer_1 = require("./llm-healer");
+const stealth_1 = require("./stealth");
 async function replay(flowPath) {
     if (!fs.existsSync(flowPath)) {
         console.error(`Flow file not found: ${flowPath}`);
@@ -61,8 +62,14 @@ async function replay(flowPath) {
         return !(prev?.action === 'navigate' && prev.url === step.url);
     });
     console.log(`\nReplaying: ${flow.name} (${steps.length} steps, ${flow.steps.length - steps.length} duplicates skipped)\n`);
-    const browser = await playwright_1.chromium.launch({ headless: false, slowMo: 300 });
-    const context = await browser.newContext();
+    const browser = await playwright_1.chromium.launch({ headless: false, slowMo: 300, channel: 'chrome', args: (0, stealth_1.stealthArgs)() })
+        .catch(() => playwright_1.chromium.launch({ headless: false, slowMo: 300, args: (0, stealth_1.stealthArgs)() }));
+    const context = await browser.newContext({
+        userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+        viewport: { width: 1280, height: 800 },
+        locale: 'en-US',
+    });
+    await (0, stealth_1.applyStealthToContext)(context);
     const page = await context.newPage();
     let flowMutated = false;
     for (const step of steps) {

@@ -52,6 +52,7 @@ const http = __importStar(require("http"));
 const flow_recorder_1 = require("./flow-recorder");
 const manual_capture_1 = require("./manual-capture");
 const pom_generator_1 = require("./pom-generator");
+const stealth_1 = require("./stealth");
 const FLOW_DIR = path.join(process.cwd(), 'flows');
 const SCREENSHOT_DIR = path.join(FLOW_DIR, 'screenshots');
 const MCP_JSON = path.join(process.cwd(), '.mcp.json');
@@ -120,16 +121,33 @@ async function main() {
     // 1. Get a free port for Chrome's remote debugging (real CDP)
     const cdpPort = await getFreePort();
     const cdpEndpoint = `http://localhost:${cdpPort}`;
-    // 2. Launch Chrome with real CDP remote debugging enabled
+    // 2. Launch Chrome with real CDP remote debugging + stealth flags
     const browser = await playwright_1.chromium.launch({
+        headless: false,
+        channel: 'chrome',
+        args: [
+            `--remote-debugging-port=${cdpPort}`,
+            '--no-first-run',
+            '--disable-default-apps',
+            ...(0, stealth_1.stealthArgs)(),
+        ],
+    }).catch(() => 
+    // Fall back to bundled Chromium if Chrome is not installed
+    playwright_1.chromium.launch({
         headless: false,
         args: [
             `--remote-debugging-port=${cdpPort}`,
             '--no-first-run',
             '--disable-default-apps',
+            ...(0, stealth_1.stealthArgs)(),
         ],
+    }));
+    const context = await browser.newContext({
+        userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+        viewport: { width: 1280, height: 800 },
+        locale: 'en-US',
     });
-    const context = await browser.newContext();
+    await (0, stealth_1.applyStealthToContext)(context);
     const page = await context.newPage();
     // 3. Initialize recorder
     const recorder = new flow_recorder_1.FlowRecorder(flowPath, flowName);
