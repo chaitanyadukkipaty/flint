@@ -9,6 +9,7 @@
  *   npm run session                  # auto-named flow
  *   npm run session -- "login flow"  # named flow
  */
+import * as os from 'os';
 import { stealthChromium as chromium, stealthArgs, stealthContextOptions, applyStealthToContext } from './stealth';
 import * as net from 'net';
 import * as path from 'path';
@@ -101,21 +102,32 @@ async function main() {
   const cdpPort = await getFreePort();
   const cdpEndpoint = `http://localhost:${cdpPort}`;
 
-  // 2. Launch Chrome with real CDP remote debugging + stealth flags
-  const browser = await chromium.launch({
-    headless: false,
-    channel: 'chrome',
-    args: stealthArgs([`--remote-debugging-port=${cdpPort}`]),
-  }).catch(() =>
-    chromium.launch({
-      headless: false,
-      args: stealthArgs([`--remote-debugging-port=${cdpPort}`]),
-    })
-  );
+  // 2. Launch Chrome using a persistent user-data-dir so the browser
+  //    looks like a real returning user (cookies, history, profile signals).
+  //    Falls back to bundled Chromium if Chrome is not installed.
+  const profileDir = path.join(os.homedir(), '.flint', 'chrome-profile');
+  fs.mkdirSync(profileDir, { recursive: true });
 
-  const context = await browser.newContext(stealthContextOptions);
+  const launchOpts = {
+    channel: 'chrome' as const,
+    headless: false as const,
+    args: stealthArgs([`--remote-debugging-port=${cdpPort}`]),
+    ...stealthContextOptions,
+  };
+
+  let context: import('playwright').BrowserContext;
+  let page: import('playwright').Page;
+
+  try {
+    context = await chromium.launchPersistentContext(profileDir, launchOpts);
+  } catch {
+    // Chrome not installed — fall back to bundled Chromium
+    const { channel: _c, ...chromiumOpts } = launchOpts;
+    context = await chromium.launchPersistentContext(profileDir, chromiumOpts);
+  }
+
   await applyStealthToContext(context);
-  const page = await context.newPage();
+  page = context.pages()[0] ?? await context.newPage();
 
   // 3. Initialize recorder
   const recorder = new FlowRecorder(flowPath, flowName);
@@ -178,7 +190,7 @@ async function main() {
     console.log('\nShutting down...');
     await cleanup();
     restoreMcpJson();
-    await browser.close();
+    await context.close();
     console.log(`Flow saved: ${flowPath} (${recorder.getStepCount()} steps)`);
     console.log('.mcp.json restored.\n');
     process.exit(0);

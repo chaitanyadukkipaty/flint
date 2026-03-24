@@ -44,6 +44,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
  *   npm run session                  # auto-named flow
  *   npm run session -- "login flow"  # named flow
  */
+const os = __importStar(require("os"));
 const stealth_1 = require("./stealth");
 const net = __importStar(require("net"));
 const path = __importStar(require("path"));
@@ -120,18 +121,29 @@ async function main() {
     // 1. Get a free port for Chrome's remote debugging (real CDP)
     const cdpPort = await getFreePort();
     const cdpEndpoint = `http://localhost:${cdpPort}`;
-    // 2. Launch Chrome with real CDP remote debugging + stealth flags
-    const browser = await stealth_1.stealthChromium.launch({
-        headless: false,
+    // 2. Launch Chrome using a persistent user-data-dir so the browser
+    //    looks like a real returning user (cookies, history, profile signals).
+    //    Falls back to bundled Chromium if Chrome is not installed.
+    const profileDir = path.join(os.homedir(), '.flint', 'chrome-profile');
+    fs.mkdirSync(profileDir, { recursive: true });
+    const launchOpts = {
         channel: 'chrome',
-        args: (0, stealth_1.stealthArgs)([`--remote-debugging-port=${cdpPort}`]),
-    }).catch(() => stealth_1.stealthChromium.launch({
         headless: false,
         args: (0, stealth_1.stealthArgs)([`--remote-debugging-port=${cdpPort}`]),
-    }));
-    const context = await browser.newContext(stealth_1.stealthContextOptions);
+        ...stealth_1.stealthContextOptions,
+    };
+    let context;
+    let page;
+    try {
+        context = await stealth_1.stealthChromium.launchPersistentContext(profileDir, launchOpts);
+    }
+    catch {
+        // Chrome not installed — fall back to bundled Chromium
+        const { channel: _c, ...chromiumOpts } = launchOpts;
+        context = await stealth_1.stealthChromium.launchPersistentContext(profileDir, chromiumOpts);
+    }
     await (0, stealth_1.applyStealthToContext)(context);
-    const page = await context.newPage();
+    page = context.pages()[0] ?? await context.newPage();
     // 3. Initialize recorder
     const recorder = new flow_recorder_1.FlowRecorder(flowPath, flowName);
     // 4. Attach manual capture
@@ -195,7 +207,7 @@ async function main() {
         console.log('\nShutting down...');
         await cleanup();
         restoreMcpJson();
-        await browser.close();
+        await context.close();
         console.log(`Flow saved: ${flowPath} (${recorder.getStepCount()} steps)`);
         console.log('.mcp.json restored.\n');
         process.exit(0);
