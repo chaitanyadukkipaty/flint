@@ -72,16 +72,14 @@ function buildPrompt(step: FlowStep, error: string, pageUrl: string, elements: s
   );
 }
 
-/** Strategy 1: Claude Code CLI */
+/** Strategy 1: Claude Code CLI (`claude --print`) */
 function healWithClaudeCli(prompt: string): HealResult | null {
   const result = spawnSync(
     'claude',
     ['--print', '--output-format', 'json', '--json-schema', HEAL_SCHEMA, '--bare', '--no-session-persistence', prompt],
     { encoding: 'utf8', timeout: 60_000 },
   );
-
   if (result.error || result.status !== 0) return null;
-
   try {
     const outer = JSON.parse(result.stdout.trim());
     const inner = typeof outer.result === 'string' ? JSON.parse(outer.result) : outer;
@@ -90,10 +88,61 @@ function healWithClaudeCli(prompt: string): HealResult | null {
   return null;
 }
 
-/** Strategy 2: Anthropic API (requires ANTHROPIC_API_KEY) */
+/** Strategy 2: GitHub Models API via `gh auth token` (works for any GitHub/Copilot user) */
+async function healWithGitHubModels(prompt: string): Promise<HealResult | null> {
+  // Get GitHub token from gh CLI
+  const tokenResult = spawnSync('gh', ['auth', 'token'], { encoding: 'utf8', timeout: 5_000 });
+  if (tokenResult.error || tokenResult.status !== 0) return null;
+  const token = tokenResult.stdout.trim();
+  if (!token) return null;
+
+  const body = JSON.stringify({
+    model: 'gpt-4o-mini',
+    max_tokens: 256,
+    messages: [{
+      role: 'user',
+      content: `${prompt}\n\nRespond with ONLY a JSON object: {"css":"...","xpath":"...","reasoning":"..."}`,
+    }],
+  });
+
+  return new Promise(resolve => {
+    const https = require('https');
+    const req = https.request({
+      hostname: 'models.inference.ai.azure.com',
+      path: '/chat/completions',
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(body),
+      },
+    }, (res: any) => {
+      let data = '';
+      res.on('data', (chunk: string) => data += chunk);
+      res.on('end', () => {
+        try {
+          const parsed = JSON.parse(data);
+          const text: string = parsed.choices?.[0]?.message?.content?.trim() ?? '';
+          const json = text.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '');
+          const result = JSON.parse(json);
+          if (typeof result.css === 'string' && typeof result.xpath === 'string') {
+            resolve(result as HealResult);
+          } else {
+            resolve(null);
+          }
+        } catch { resolve(null); }
+      });
+    });
+    req.on('error', () => resolve(null));
+    req.setTimeout(30_000, () => { req.destroy(); resolve(null); });
+    req.write(body);
+    req.end();
+  });
+}
+
+/** Strategy 3: Anthropic API (requires ANTHROPIC_API_KEY) */
 async function healWithAnthropicApi(prompt: string): Promise<HealResult | null> {
   if (!process.env.ANTHROPIC_API_KEY) return null;
-
   try {
     const Anthropic = require('@anthropic-ai/sdk');
     const client = new Anthropic.default();
@@ -106,7 +155,6 @@ async function healWithAnthropicApi(prompt: string): Promise<HealResult | null> 
       }],
     });
     const text = (response.content[0] as { type: string; text: string }).text.trim();
-    // Strip markdown code fences if present
     const json = text.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '');
     const parsed = JSON.parse(json);
     if (typeof parsed.css === 'string' && typeof parsed.xpath === 'string') return parsed as HealResult;
@@ -116,7 +164,11 @@ async function healWithAnthropicApi(prompt: string): Promise<HealResult | null> 
 
 /**
  * Ask an LLM for an alternative locator when a step fails.
- * Tries Claude Code CLI first, then Anthropic API, then gives up.
+ *
+ * Strategy order:
+ *   1. Claude Code CLI  — `claude --print`   (Claude Code users, no key needed)
+ *   2. GitHub Models    — `gh auth token`     (GitHub / VS Code Copilot users, no key needed)
+ *   3. Anthropic API    — ANTHROPIC_API_KEY   (explicit API key fallback)
  */
 export async function healStep(page: Page, step: FlowStep, error: string): Promise<HealResult | null> {
   if (!step.element) return null;
@@ -133,19 +185,25 @@ export async function healStep(page: Page, step: FlowStep, error: string): Promi
 
   const prompt = buildPrompt(step, error, page.url(), elements);
 
-  // 1. Try Claude Code CLI (works without API key — uses existing auth)
+  // 1. Claude Code CLI
   const cliResult = healWithClaudeCli(prompt);
   if (cliResult) return cliResult;
 
-  // 2. Try Anthropic API (works in VS Code Copilot or any environment with key)
+  // 2. GitHub Models API (Copilot / any GitHub-authenticated user)
+  console.log('  ℹ claude CLI unavailable — trying GitHub Models (gh auth token)...');
+  const ghResult = await healWithGitHubModels(prompt);
+  if (ghResult) return ghResult;
+
+  // 3. Anthropic API
   if (process.env.ANTHROPIC_API_KEY) {
-    console.log('  ℹ claude CLI unavailable — using Anthropic API');
+    console.log('  ℹ GitHub Models unavailable — using Anthropic API...');
     const apiResult = await healWithAnthropicApi(prompt);
     if (apiResult) return apiResult;
-  } else {
-    console.warn('  ⚠ claude CLI not found and ANTHROPIC_API_KEY not set — skipping LLM healing');
-    console.warn('    Set ANTHROPIC_API_KEY to enable healing without Claude Code CLI');
   }
 
+  console.warn('  ⚠ All healing strategies failed. To enable healing:');
+  console.warn('    - Claude Code: install claude CLI and authenticate');
+  console.warn('    - VS Code Copilot: run `gh auth login`');
+  console.warn('    - Any env: set ANTHROPIC_API_KEY');
   return null;
 }
