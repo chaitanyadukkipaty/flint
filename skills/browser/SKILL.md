@@ -95,11 +95,118 @@ When invoked with a task:
 
 ## Get Locators On Demand
 
-If the user asks **"get locators"** or **"show locators"**:
+### Full-page locators
+If the user asks **"get locators"** or **"show locators"** (no section specified):
 ```bash
 npx flint pom
 ```
 Prints CSS + XPath for all interactive elements with resilience scores.
+
+### Section locators (interactive picker)
+If the user asks **"get locators for a section"**, **"pick a section"**, **"locators for this section"**, or anything implying they want to scope locators to part of the page:
+
+**Step 1 — inject the section picker** via `browser_run_code`:
+```javascript
+async (page) => {
+  return await page.evaluate(() => new Promise(resolve => {
+    const overlay = document.createElement('div');
+    overlay.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;z-index:2147483647;cursor:crosshair;pointer-events:all;';
+    const hl = document.createElement('div');
+    hl.style.cssText = 'position:fixed;pointer-events:none;z-index:2147483646;outline:3px solid #f97316;background:rgba(249,115,22,0.08);border-radius:3px;transition:all 0.08s;';
+    const lbl = document.createElement('div');
+    lbl.style.cssText = 'position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:#1e293b;color:#f8fafc;padding:8px 16px;border-radius:6px;font:13px/1.4 monospace;z-index:2147483647;pointer-events:none;white-space:nowrap;';
+    lbl.textContent = 'Click a section to scope locators • Esc = full page';
+    document.body.append(hl, lbl, overlay);
+    function blockAncestor(el) {
+      while (el && el !== document.body) {
+        const s = window.getComputedStyle(el), r = el.getBoundingClientRect();
+        if ((s.display==='block'||s.display==='flex'||s.display==='grid')&&r.width>60&&r.height>30) return el;
+        el = el.parentElement;
+      }
+      return document.body;
+    }
+    function buildSel(el) {
+      if (el.id && !/^\d|react-|ember/.test(el.id)) return '#'+CSS.escape(el.id);
+      const tid = el.getAttribute('data-testid')||el.getAttribute('data-cy')||'';
+      if (tid) return `[data-testid="${tid}"]`;
+      const al = el.getAttribute('aria-label')||'';
+      if (al) return `${el.tagName.toLowerCase()}[aria-label="${al}"]`;
+      const parts=[]; let cur=el;
+      for(let d=0;d<3&&cur&&cur!==document.body;d++){
+        const tag=cur.tagName.toLowerCase();
+        const sibs=cur.parentElement?[...cur.parentElement.children].filter(c=>c.tagName===cur.tagName):[];
+        parts.unshift(sibs.length>1?`${tag}:nth-of-type(${sibs.indexOf(cur)+1})`:tag);
+        cur=cur.parentElement;
+      }
+      return parts.join(' > ');
+    }
+    overlay.addEventListener('mousemove', e => {
+      overlay.style.pointerEvents='none';
+      const t=document.elementFromPoint(e.clientX,e.clientY);
+      overlay.style.pointerEvents='all';
+      if(!t) return;
+      const sec=blockAncestor(t), r=sec.getBoundingClientRect();
+      Object.assign(hl.style,{top:r.top+'px',left:r.left+'px',width:r.width+'px',height:r.height+'px'});
+      lbl.textContent=`<${sec.tagName.toLowerCase()}${sec.id?'#'+sec.id:''}> — click to select • Esc = full page`;
+    });
+    overlay.addEventListener('click', e => {
+      overlay.style.pointerEvents='none';
+      const t=document.elementFromPoint(e.clientX,e.clientY);
+      [overlay,hl,lbl].forEach(n=>n.remove());
+      resolve(t&&blockAncestor(t)!==document.body ? buildSel(blockAncestor(t)) : null);
+    });
+    document.addEventListener('keydown', e => { if(e.key==='Escape'){[overlay,hl,lbl].forEach(n=>n.remove());resolve(null);} }, {once:true});
+  }));
+}
+```
+Tell the user: **"The section picker is active in the browser — hover to highlight sections and click one to select it. Press Escape to use the full page."**
+
+Wait for the user to make their selection. The function returns the section CSS selector (or `null` for full page).
+
+**Step 2 — extract locators scoped to that section** via `browser_run_code`, substituting `SECTION_SELECTOR` with the returned value (or `'body'` if null):
+```javascript
+async (page) => {
+  return await page.evaluate((rootSel) => {
+    const root = rootSel ? (document.querySelector(rootSel) || document.body) : document.body;
+    const SEL = 'input,button,a[href],select,textarea,[role="button"],[role="link"],[role="textbox"],[role="checkbox"],[role="combobox"],[role="tab"],[role="menuitem"]';
+    function vis(el){const r=el.getBoundingClientRect(),s=window.getComputedStyle(el);return r.width>0&&r.height>0&&s.visibility!=='hidden'&&s.display!=='none'&&s.opacity!=='0';}
+    function esc(v){return v.replace(/'/g,"\\'").replace(/"/g,'\\"');}
+    function snake(s){return s.toLowerCase().replace(/[^a-z0-9]+/g,'_').replace(/^_+|_+$/g,'').slice(0,40)||'element';}
+    function isAutoId(id){return/^(react-|ember|__|\d|uid|comp|el-)/.test(id)||/\d{4,}/.test(id);}
+    const seen=new Set(), out=[];
+    root.querySelectorAll(SEL).forEach(el=>{
+      if(!vis(el))return;
+      const tag=el.tagName.toLowerCase(), testId=el.getAttribute('data-testid')||el.getAttribute('data-cy')||'',
+        al=el.getAttribute('aria-label')||'', id=el.getAttribute('id')||'',
+        nm=el.getAttribute('name')||'', ph=el.getAttribute('placeholder')||'',
+        tp=el.getAttribute('type')||'', txt=(el.innerText||'').trim().slice(0,60),
+        labelEl=id?document.querySelector(`label[for="${id}"]`):null, labelTxt=(labelEl?.innerText||'').trim();
+      let css='',xpath='',score=0,fragile=false,name='';
+      if(testId){const a=el.getAttribute('data-testid')?'data-testid':'data-cy';css=`[${a}="${esc(testId)}"]`;xpath=`//${tag}[@${a}="${esc(testId)}"]`;score=95;name=snake(testId);}
+      else if(al){css=`${tag}[aria-label="${esc(al)}"]`;xpath=`//${tag}[@aria-label="${esc(al)}"]`;score=90;name=snake(al);}
+      else if(id&&!isAutoId(id)){css=`#${CSS.escape(id)}`;xpath=`//${tag}[@id="${esc(id)}"]`;score=85;name=snake(id);}
+      else if(labelTxt){css=id?`#${CSS.escape(id)}`:`${tag}[name="${esc(nm||id)}"]`;xpath=`//label[normalize-space()="${esc(labelTxt)}"]/following-sibling::${tag}[1]`;score=80;name=snake(labelTxt)+(tag==='input'?'_input':'');}
+      else if(nm){css=`${tag}[name="${esc(nm)}"]`;xpath=`//${tag}[@name="${esc(nm)}"]`;score=75;name=snake(nm);}
+      else if(ph){css=`${tag}[placeholder="${esc(ph)}"]`;xpath=`//${tag}[@placeholder="${esc(ph)}"]`;score=70;name=snake(ph)+'_input';}
+      else if(tp&&(tag==='input'||tag==='button')){css=`${tag}[type="${tp}"]`;xpath=`//${tag}[@type="${tp}"]`;score=60;name=snake(tp+'_'+tag);}
+      else if(txt){css=tag;xpath=`//${tag}[normalize-space()="${esc(txt)}"]`;score=60;name=snake(txt)+(tag==='button'?'_button':tag==='a'?'_link':'');}
+      else{score=20;fragile=true;name=snake(txt||tag)+'_el';const parts=[],cur2=el;let c=el;for(let d=0;d<3&&c&&c!==document.body;d++){const t2=c.tagName.toLowerCase(),sibs=c.parentElement?[...c.parentElement.children].filter(x=>x.tagName===c.tagName):[];parts.unshift(sibs.length>1?`${t2}:nth-of-type(${sibs.indexOf(c)+1})`:t2);c=c.parentElement;}css=parts.join(' > ');xpath='//'+parts.join('/');}
+      if(!css||seen.has(css))return;
+      seen.add(css);
+      out.push({name,css,xpath,score,fragile});
+    });
+    return out.sort((a,b)=>b.score-a.score);
+  }, 'SECTION_SELECTOR');
+}
+```
+
+**Format and print the results** as:
+```
+Section: SECTION_SELECTOR
+─────────────────────────────────────────
+element_name         CSS: selector                        [score] ⚠
+                     XPath: xpath
+```
 
 ## Recording
 
