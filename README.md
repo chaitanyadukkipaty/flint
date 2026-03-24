@@ -19,10 +19,18 @@ Hybrid browser automation for Claude Code and VS Code Copilot. Record browser fl
 
 ## Installation
 
+**From GitHub (current):**
+```bash
+# project dependency
+npm install github:chaitanyadukkipaty/flint
+
+# global
+npm install -g github:chaitanyadukkipaty/flint
+```
+
+**From npm (once published):**
 ```bash
 npm install -g flint
-# or as a project dependency
-npm install flint
 ```
 
 ## Setup
