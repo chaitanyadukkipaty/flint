@@ -6,3 +6,8 @@ node_modules/
 *.yaml
 tsconfig.json
 .mcp.json
+.vscode/
+.github/
+.playwright-mcp/
+*.tgz
+.env
