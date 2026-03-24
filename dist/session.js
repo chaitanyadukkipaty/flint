@@ -148,9 +148,10 @@ async function main() {
     console.log('─'.repeat(60));
     console.log('');
     console.log('Commands (type in this terminal):');
-    console.log('  locators  (l)  → resilient locators for current page');
-    console.log('  save      (s)  → confirm flow is saved');
-    console.log('  quit      (q)  → end session + restore .mcp.json');
+    console.log('  locators  (l)   → resilient locators for current page');
+    console.log('  section   (sl)  → pick a section visually, then show scoped locators');
+    console.log('  save      (s)   → confirm flow is saved');
+    console.log('  quit      (q)   → end session + restore .mcp.json');
     console.log('');
     // 6. REPL
     process.stdin.setEncoding('utf8');
@@ -164,6 +165,19 @@ async function main() {
             }
             catch (e) {
                 console.error('Could not get locators:', e.message);
+            }
+        }
+        else if (cmd === 'section' || cmd === 'sl') {
+            try {
+                const selector = await (0, pom_generator_1.pickSection)(page);
+                const sectionDesc = selector ?? 'full page';
+                if (!selector)
+                    console.log('  No section selected — using full page.\n');
+                const entries = await (0, pom_generator_1.generateLocators)(page, selector ?? undefined);
+                console.log('\n' + (0, pom_generator_1.formatLocators)(entries, page.url(), await page.title(), selector ?? undefined) + '\n');
+            }
+            catch (e) {
+                console.error('Could not get section locators:', e.message);
             }
         }
         else if (cmd === 'save' || cmd === 's') {

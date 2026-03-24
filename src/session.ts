@@ -16,7 +16,7 @@ import * as fs from 'fs';
 import * as http from 'http';
 import { FlowRecorder } from './flow-recorder';
 import { attachManualCapture } from './manual-capture';
-import { generateLocators, formatLocators } from './pom-generator';
+import { generateLocators, formatLocators, pickSection } from './pom-generator';
 
 const FLOW_DIR = path.join(process.cwd(), 'flows');
 const SCREENSHOT_DIR = path.join(FLOW_DIR, 'screenshots');
@@ -133,9 +133,10 @@ async function main() {
   console.log('─'.repeat(60));
   console.log('');
   console.log('Commands (type in this terminal):');
-  console.log('  locators  (l)  → resilient locators for current page');
-  console.log('  save      (s)  → confirm flow is saved');
-  console.log('  quit      (q)  → end session + restore .mcp.json');
+  console.log('  locators  (l)   → resilient locators for current page');
+  console.log('  section   (sl)  → pick a section visually, then show scoped locators');
+  console.log('  save      (s)   → confirm flow is saved');
+  console.log('  quit      (q)   → end session + restore .mcp.json');
   console.log('');
 
   // 6. REPL
@@ -150,6 +151,16 @@ async function main() {
         console.log('\n' + formatLocators(entries, page.url(), await page.title()) + '\n');
       } catch (e: any) {
         console.error('Could not get locators:', e.message);
+      }
+    } else if (cmd === 'section' || cmd === 'sl') {
+      try {
+        const selector = await pickSection(page);
+        const sectionDesc = selector ?? 'full page';
+        if (!selector) console.log('  No section selected — using full page.\n');
+        const entries = await generateLocators(page, selector ?? undefined);
+        console.log('\n' + formatLocators(entries, page.url(), await page.title(), selector ?? undefined) + '\n');
+      } catch (e: any) {
+        console.error('Could not get section locators:', e.message);
       }
     } else if (cmd === 'save' || cmd === 's') {
       console.log(`\n✅ Flow: ${flowPath} (${recorder.getStepCount()} steps)\n`);
