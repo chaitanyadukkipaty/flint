@@ -1,6 +1,3 @@
-export type Assistant = 'claude' | 'copilot' | 'both';
-export interface FlintConfig {
-    assistant: Assistant;
-}
-export declare function loadConfig(cwd?: string): FlintConfig | null;
+import { loadConfig } from './config';
+export { loadConfig };
 //# sourceMappingURL=init.d.ts.map

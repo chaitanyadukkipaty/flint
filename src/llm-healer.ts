@@ -10,7 +10,7 @@
 import { spawnSync } from 'child_process';
 import { Page } from 'playwright';
 import { FlowStep } from './flow-recorder';
-import { loadConfig } from './init';
+import { loadConfig } from './config';
 
 const HEAL_SCHEMA = JSON.stringify({
   type: 'object',

@@ -22,7 +22,12 @@ export interface LocatorEntry {
     resilience: number;
     fragile: boolean;
 }
-export declare function generateLocators(page: Page): Promise<LocatorEntry[]>;
-export declare function formatLocators(entries: LocatorEntry[], url: string, title: string): string;
+/**
+ * Injects an interactive overlay that lets the user click on a section of the page.
+ * Returns a unique CSS selector for the clicked element.
+ */
+export declare function pickSection(page: Page): Promise<string | null>;
+export declare function generateLocators(page: Page, sectionSelector?: string): Promise<LocatorEntry[]>;
+export declare function formatLocators(entries: LocatorEntry[], url: string, title: string, sectionSelector?: string): string;
 export declare function runCli(): Promise<void>;
 //# sourceMappingURL=pom-generator.d.ts.map

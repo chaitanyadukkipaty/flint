@@ -6,12 +6,9 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as readline from 'readline';
+import { Assistant, FlintConfig, loadConfig } from './config';
 
-export type Assistant = 'claude' | 'copilot' | 'both';
-
-export interface FlintConfig {
-  assistant: Assistant;
-}
+export { loadConfig };
 
 const CONFIG_FILE = '.flint.json';
 
@@ -78,15 +75,6 @@ function writeIfAbsent(filePath: string, content: string, label: string) {
     console.log(`  ✅ ${label}`);
   } else {
     console.log(`  ℹ  ${label} — already exists, skipped`);
-  }
-}
-
-export function loadConfig(cwd: string = process.cwd()): FlintConfig | null {
-  const p = path.join(cwd, CONFIG_FILE);
-  try {
-    return JSON.parse(fs.readFileSync(p, 'utf8')) as FlintConfig;
-  } catch {
-    return null;
   }
 }
 

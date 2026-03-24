@@ -11,7 +11,7 @@ exports.healStep = healStep;
  *   2. Anthropic API  (`ANTHROPIC_API_KEY`) — works with VS Code Copilot or any env
  */
 const child_process_1 = require("child_process");
-const init_1 = require("./init");
+const config_1 = require("./config");
 const HEAL_SCHEMA = JSON.stringify({
     type: 'object',
     properties: {
@@ -186,7 +186,7 @@ async function healStep(page, step, error) {
         return null;
     }
     const prompt = buildPrompt(step, error, page.url(), elements);
-    const config = (0, init_1.loadConfig)();
+    const config = (0, config_1.loadConfig)();
     const assistant = config?.assistant ?? 'both';
     // Define strategy lists per preference
     const strategies = assistant === 'copilot'

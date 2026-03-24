@@ -1,10 +1,119 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.pickSection = pickSection;
 exports.generateLocators = generateLocators;
 exports.formatLocators = formatLocators;
 exports.runCli = runCli;
-async function generateLocators(page) {
-    const raw = await page.evaluate(() => {
+/**
+ * Injects an interactive overlay that lets the user click on a section of the page.
+ * Returns a unique CSS selector for the clicked element.
+ */
+async function pickSection(page) {
+    console.log('\n  Click on a section to scope locator generation. Press Escape to use full page.\n');
+    return page.evaluate(() => new Promise(resolve => {
+        const overlay = document.createElement('div');
+        overlay.id = '__flint_section_picker__';
+        overlay.style.cssText = [
+            'position:fixed', 'top:0', 'left:0', 'width:100%', 'height:100%',
+            'z-index:2147483647', 'cursor:crosshair', 'pointer-events:all',
+        ].join(';');
+        const highlight = document.createElement('div');
+        highlight.style.cssText = [
+            'position:fixed', 'pointer-events:none', 'z-index:2147483646',
+            'outline:3px solid #f97316', 'background:rgba(249,115,22,0.08)',
+            'transition:all 0.08s', 'border-radius:3px',
+        ].join(';');
+        document.body.appendChild(highlight);
+        const label = document.createElement('div');
+        label.style.cssText = [
+            'position:fixed', 'bottom:16px', 'left:50%', 'transform:translateX(-50%)',
+            'background:#1e293b', 'color:#f8fafc', 'padding:8px 16px',
+            'border-radius:6px', 'font:13px/1.4 monospace', 'z-index:2147483647',
+            'pointer-events:none', 'white-space:nowrap',
+        ].join(';');
+        label.textContent = 'Hover over a section and click to scope • Esc = full page';
+        document.body.appendChild(label);
+        function buildSelector(el) {
+            const e = el;
+            if (e.id && !/^\d|react-|ember/.test(e.id))
+                return `#${CSS.escape(e.id)}`;
+            const testId = e.getAttribute('data-testid') ?? e.getAttribute('data-cy') ?? '';
+            if (testId)
+                return `[data-testid="${testId}"]`;
+            const ariaLabel = e.getAttribute('aria-label') ?? '';
+            if (ariaLabel)
+                return `${e.tagName.toLowerCase()}[aria-label="${ariaLabel}"]`;
+            // Build structural path (max 3 levels)
+            const parts = [];
+            let cur = el;
+            for (let depth = 0; depth < 3 && cur && cur !== document.body; depth++) {
+                const tag = cur.tagName.toLowerCase();
+                const siblings = cur.parentElement
+                    ? Array.from(cur.parentElement.children).filter(c => c.tagName === cur.tagName)
+                    : [];
+                parts.unshift(siblings.length > 1 ? `${tag}:nth-of-type(${siblings.indexOf(cur) + 1})` : tag);
+                cur = cur.parentElement;
+            }
+            return parts.join(' > ');
+        }
+        function getBlockAncestor(target) {
+            // Walk up to find a meaningful block container (not body/html)
+            let el = target;
+            while (el && el !== document.body) {
+                const tag = el.tagName.toLowerCase();
+                const style = window.getComputedStyle(el);
+                const display = style.display;
+                const isBlock = display === 'block' || display === 'flex' || display === 'grid' || display === 'table';
+                const hasBounds = el.getBoundingClientRect().width > 60 && el.getBoundingClientRect().height > 30;
+                if (isBlock && hasBounds && tag !== 'html')
+                    return el;
+                el = el.parentElement;
+            }
+            return document.body;
+        }
+        overlay.addEventListener('mousemove', (e) => {
+            overlay.style.pointerEvents = 'none';
+            const target = document.elementFromPoint(e.clientX, e.clientY);
+            overlay.style.pointerEvents = 'all';
+            if (!target)
+                return;
+            const section = getBlockAncestor(target);
+            const r = section.getBoundingClientRect();
+            highlight.style.top = `${r.top}px`;
+            highlight.style.left = `${r.left}px`;
+            highlight.style.width = `${r.width}px`;
+            highlight.style.height = `${r.height}px`;
+            label.textContent = `<${section.tagName.toLowerCase()}${section.id ? '#' + section.id : ''}> • click to select • Esc = full page`;
+        });
+        overlay.addEventListener('click', (e) => {
+            overlay.style.pointerEvents = 'none';
+            const target = document.elementFromPoint(e.clientX, e.clientY);
+            overlay.style.pointerEvents = 'all';
+            cleanup();
+            if (!target) {
+                resolve(null);
+                return;
+            }
+            const section = getBlockAncestor(target);
+            resolve(section === document.body ? null : buildSelector(section));
+        });
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') {
+                cleanup();
+                resolve(null);
+            }
+        }, { once: true });
+        function cleanup() {
+            overlay.remove();
+            highlight.remove();
+            label.remove();
+        }
+        document.body.appendChild(overlay);
+    }));
+}
+async function generateLocators(page, sectionSelector) {
+    const raw = await page.evaluate((rootSel) => {
+        const root = rootSel ? (document.querySelector(rootSel) ?? document.body) : document.body;
         const INTERACTIVE_SELECTORS = 'input, button, a[href], select, textarea, [role="button"], ' +
             '[role="link"], [role="textbox"], [role="checkbox"], [role="combobox"], ' +
             '[role="tab"], [role="menuitem"], [role="switch"]';
@@ -65,7 +174,7 @@ async function generateLocators(page) {
         }
         const seen = new Set();
         const entries = [];
-        document.querySelectorAll(INTERACTIVE_SELECTORS).forEach(el => {
+        root.querySelectorAll(INTERACTIVE_SELECTORS).forEach(el => {
             if (!isVisible(el))
                 return;
             const tag = el.tagName.toLowerCase();
@@ -162,11 +271,12 @@ async function generateLocators(page) {
             entries.push({ name: humanName, css, xpath, resilience, fragile });
         });
         return entries;
-    });
+    }, sectionSelector);
     return raw.sort((a, b) => b.resilience - a.resilience);
 }
-function formatLocators(entries, url, title) {
-    const header = `Page: ${title} | ${url}\n`;
+function formatLocators(entries, url, title, sectionSelector) {
+    const scope = sectionSelector ? ` (section: ${sectionSelector})` : '';
+    const header = `Page: ${title} | ${url}${scope}\n`;
     const lines = entries.map(e => {
         const flag = e.fragile ? ' ⚠' : '';
         return (`${e.name.padEnd(28)} CSS: ${e.css.padEnd(50)} [${e.resilience}]${flag}\n` +
@@ -176,12 +286,29 @@ function formatLocators(entries, url, title) {
 }
 async function runCli() {
     const { chromium } = require('playwright');
-    const url = process.argv[2] ?? 'https://example.com';
+    const args = process.argv.slice(2);
+    const sectionFlagIdx = args.findIndex(a => a === '--section' || a.startsWith('--section='));
+    const wantsSection = sectionFlagIdx !== -1;
+    const explicitSelector = wantsSection && args[sectionFlagIdx].includes('=')
+        ? args[sectionFlagIdx].split('=').slice(1).join('=')
+        : undefined;
+    const urlArgs = args.filter(a => !a.startsWith('--'));
+    const url = urlArgs[0] ?? 'https://example.com';
     const browser = await chromium.launch({ headless: false });
     const page = await browser.newPage();
     await page.goto(url, { waitUntil: 'networkidle' });
-    const entries = await generateLocators(page);
-    console.log(formatLocators(entries, page.url(), await page.title()));
+    let sectionSelector;
+    if (explicitSelector) {
+        sectionSelector = explicitSelector;
+    }
+    else if (wantsSection) {
+        const picked = await pickSection(page);
+        sectionSelector = picked ?? undefined;
+        if (!sectionSelector)
+            console.log('  No section selected — using full page.\n');
+    }
+    const entries = await generateLocators(page, sectionSelector);
+    console.log(formatLocators(entries, page.url(), await page.title(), sectionSelector));
     await browser.close();
 }
 if (require.main === module) {

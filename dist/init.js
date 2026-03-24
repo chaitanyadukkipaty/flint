@@ -33,7 +33,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.loadConfig = loadConfig;
+exports.loadConfig = void 0;
 /**
  * init.ts — one-time project setup for flint.
  * Asks which AI assistant the user is using and configures accordingly.
@@ -42,6 +42,8 @@ exports.loadConfig = loadConfig;
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const readline = __importStar(require("readline"));
+const config_1 = require("./config");
+Object.defineProperty(exports, "loadConfig", { enumerable: true, get: function () { return config_1.loadConfig; } });
 const CONFIG_FILE = '.flint.json';
 const COPILOT_INSTRUCTIONS = `## Browser Automation (flint)
 
@@ -106,15 +108,6 @@ function writeIfAbsent(filePath, content, label) {
     }
     else {
         console.log(`  ℹ  ${label} — already exists, skipped`);
-    }
-}
-function loadConfig(cwd = process.cwd()) {
-    const p = path.join(cwd, CONFIG_FILE);
-    try {
-        return JSON.parse(fs.readFileSync(p, 'utf8'));
-    }
-    catch {
-        return null;
     }
 }
 async function init() {
