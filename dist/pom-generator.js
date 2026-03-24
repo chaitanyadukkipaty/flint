@@ -2,6 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.generateLocators = generateLocators;
 exports.formatLocators = formatLocators;
+exports.runCli = runCli;
 async function generateLocators(page) {
     const raw = await page.evaluate(() => {
         const INTERACTIVE_SELECTORS = 'input, button, a[href], select, textarea, [role="button"], ' +
@@ -173,16 +174,16 @@ function formatLocators(entries, url, title) {
     });
     return header + '\n' + lines.join('\n\n');
 }
-// CLI usage: ts-node src/pom-generator.ts <url>
-if (require.main === module) {
+async function runCli() {
     const { chromium } = require('playwright');
-    (async () => {
-        const url = process.argv[2] ?? 'https://example.com';
-        const browser = await chromium.launch({ headless: false });
-        const page = await browser.newPage();
-        await page.goto(url, { waitUntil: 'networkidle' });
-        const entries = await generateLocators(page);
-        console.log(formatLocators(entries, page.url(), await page.title()));
-        await browser.close();
-    })();
+    const url = process.argv[2] ?? 'https://example.com';
+    const browser = await chromium.launch({ headless: false });
+    const page = await browser.newPage();
+    await page.goto(url, { waitUntil: 'networkidle' });
+    const entries = await generateLocators(page);
+    console.log(formatLocators(entries, page.url(), await page.title()));
+    await browser.close();
+}
+if (require.main === module) {
+    runCli().catch(console.error);
 }

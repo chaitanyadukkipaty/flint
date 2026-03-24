@@ -201,16 +201,17 @@ export function formatLocators(entries: LocatorEntry[], url: string, title: stri
   return header + '\n' + lines.join('\n\n');
 }
 
-// CLI usage: ts-node src/pom-generator.ts <url>
-if (require.main === module) {
+export async function runCli() {
   const { chromium } = require('playwright');
-  (async () => {
-    const url = process.argv[2] ?? 'https://example.com';
-    const browser = await chromium.launch({ headless: false });
-    const page = await browser.newPage();
-    await page.goto(url, { waitUntil: 'networkidle' });
-    const entries = await generateLocators(page);
-    console.log(formatLocators(entries, page.url(), await page.title()));
-    await browser.close();
-  })();
+  const url = process.argv[2] ?? 'https://example.com';
+  const browser = await chromium.launch({ headless: false });
+  const page = await browser.newPage();
+  await page.goto(url, { waitUntil: 'networkidle' });
+  const entries = await generateLocators(page);
+  console.log(formatLocators(entries, page.url(), await page.title()));
+  await browser.close();
+}
+
+if (require.main === module) {
+  runCli().catch(console.error);
 }

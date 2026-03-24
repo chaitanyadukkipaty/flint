@@ -33,19 +33,22 @@ switch (cmd) {
     require('./init');
     break;
   case 'session':
-    // Forward remaining args so session.ts reads them via process.argv
     if (args[0]) process.argv[2] = args[0];
     require('./session');
     break;
-  case 'replay':
+  case 'replay': {
     if (!args[0]) { console.error('Usage: flint replay <flow.yaml>'); process.exit(1); }
     process.argv[2] = args[0];
-    require('./flow-player');
+    const { runCli } = require('./flow-player');
+    runCli();
     break;
-  case 'pom':
+  }
+  case 'pom': {
     if (args[0]) process.argv[2] = args[0];
-    require('./pom-generator');
+    const { runCli } = require('./pom-generator');
+    runCli();
     break;
+  }
   default:
     help();
     if (cmd) process.exit(1);

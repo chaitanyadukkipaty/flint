@@ -131,12 +131,15 @@ async function executeStep(page: Page, step: FlowStep) {
   }
 }
 
-// CLI
-if (require.main === module) {
+export function runCli() {
   const flowPath = process.argv[2];
   if (!flowPath) {
-    console.error('Usage: ts-node src/flow-player.ts <flow-file.yaml>');
+    console.error('Usage: flint replay <flow-file.yaml>');
     process.exit(1);
   }
   replay(path.resolve(flowPath)).catch(console.error);
+}
+
+if (require.main === module) {
+  runCli();
 }

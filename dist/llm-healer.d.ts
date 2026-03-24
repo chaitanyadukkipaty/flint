@@ -6,8 +6,8 @@ export interface HealResult {
     reasoning: string;
 }
 /**
- * Ask Claude Code CLI to suggest an alternative locator for a failed step.
- * Returns null if healing is not possible (claude not in PATH, DOM empty, etc.).
+ * Ask an LLM for an alternative locator when a step fails.
+ * Tries Claude Code CLI first, then Anthropic API, then gives up.
  */
 export declare function healStep(page: Page, step: FlowStep, error: string): Promise<HealResult | null>;
 //# sourceMappingURL=llm-healer.d.ts.map

@@ -3,9 +3,12 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.healStep = healStep;
 /**
  * llm-healer.ts
- * When a replay step fails, captures live DOM context and uses the
- * `claude` CLI (Claude Code) to find an alternative CSS/XPath locator.
- * No API key required — piggybacks on the existing Claude Code session.
+ * When a replay step fails, captures live DOM context and asks an LLM
+ * to find an alternative CSS/XPath locator, then retries the step.
+ *
+ * Healing strategy (in order):
+ *   1. Claude Code CLI (`claude --print`) — no API key needed
+ *   2. Anthropic API  (`ANTHROPIC_API_KEY`) — works with VS Code Copilot or any env
  */
 const child_process_1 = require("child_process");
 const HEAL_SCHEMA = JSON.stringify({
@@ -17,7 +20,6 @@ const HEAL_SCHEMA = JSON.stringify({
     },
     required: ['css', 'xpath', 'reasoning'],
 });
-/** Extract interactive elements visible on the current page */
 async function extractPageElements(page) {
     return page.evaluate(() => {
         const sel = 'a,button,input,select,textarea,[role="button"],[role="link"],[role="checkbox"],[role="tab"],[onclick]';
@@ -54,9 +56,60 @@ async function extractPageElements(page) {
             .join('\n');
     });
 }
+function buildPrompt(step, error, pageUrl, elements) {
+    return (`A browser automation replay step failed. Find a working CSS selector for the target element.\n\n` +
+        `Failed step:\n` +
+        `  action: ${step.action}\n` +
+        `  element name: ${step.element.name}\n` +
+        `  original CSS: ${step.element.css}\n` +
+        `  original XPath: ${step.element.xpath}\n` +
+        `  error: ${error}\n` +
+        `  page URL: ${pageUrl}\n\n` +
+        `Current page interactive elements:\n${elements}\n\n` +
+        `Find the element that best matches "${step.element.name}" and return its CSS selector and XPath.`);
+}
+/** Strategy 1: Claude Code CLI */
+function healWithClaudeCli(prompt) {
+    const result = (0, child_process_1.spawnSync)('claude', ['--print', '--output-format', 'json', '--json-schema', HEAL_SCHEMA, '--bare', '--no-session-persistence', prompt], { encoding: 'utf8', timeout: 60_000 });
+    if (result.error || result.status !== 0)
+        return null;
+    try {
+        const outer = JSON.parse(result.stdout.trim());
+        const inner = typeof outer.result === 'string' ? JSON.parse(outer.result) : outer;
+        if (typeof inner.css === 'string' && typeof inner.xpath === 'string')
+            return inner;
+    }
+    catch { }
+    return null;
+}
+/** Strategy 2: Anthropic API (requires ANTHROPIC_API_KEY) */
+async function healWithAnthropicApi(prompt) {
+    if (!process.env.ANTHROPIC_API_KEY)
+        return null;
+    try {
+        const Anthropic = require('@anthropic-ai/sdk');
+        const client = new Anthropic.default();
+        const response = await client.messages.create({
+            model: 'claude-sonnet-4-6',
+            max_tokens: 256,
+            messages: [{
+                    role: 'user',
+                    content: `${prompt}\n\nRespond with ONLY a JSON object: {"css":"...","xpath":"...","reasoning":"..."}`,
+                }],
+        });
+        const text = response.content[0].text.trim();
+        // Strip markdown code fences if present
+        const json = text.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '');
+        const parsed = JSON.parse(json);
+        if (typeof parsed.css === 'string' && typeof parsed.xpath === 'string')
+            return parsed;
+    }
+    catch { }
+    return null;
+}
 /**
- * Ask Claude Code CLI to suggest an alternative locator for a failed step.
- * Returns null if healing is not possible (claude not in PATH, DOM empty, etc.).
+ * Ask an LLM for an alternative locator when a step fails.
+ * Tries Claude Code CLI first, then Anthropic API, then gives up.
  */
 async function healStep(page, step, error) {
     if (!step.element)
@@ -72,43 +125,21 @@ async function healStep(page, step, error) {
         console.warn('  ⚠ No interactive elements found on page — skipping LLM healing');
         return null;
     }
-    const prompt = `A browser automation replay step failed. Find a working CSS selector for the target element.\n\n` +
-        `Failed step:\n` +
-        `  action: ${step.action}\n` +
-        `  element name: ${step.element.name}\n` +
-        `  original CSS: ${step.element.css}\n` +
-        `  original XPath: ${step.element.xpath}\n` +
-        `  error: ${error}\n` +
-        `  page URL: ${page.url()}\n\n` +
-        `Current page interactive elements:\n${elements}\n\n` +
-        `Find the element that best matches "${step.element.name}" and return its CSS selector and XPath.`;
-    const result = (0, child_process_1.spawnSync)('claude', [
-        '--print',
-        '--output-format', 'json',
-        '--json-schema', HEAL_SCHEMA,
-        '--bare',
-        '--no-session-persistence',
-        prompt,
-    ], { encoding: 'utf8', timeout: 60_000 });
-    if (result.error) {
-        console.warn(`  ⚠ claude CLI not available: ${result.error.message}`);
-        return null;
+    const prompt = buildPrompt(step, error, page.url(), elements);
+    // 1. Try Claude Code CLI (works without API key — uses existing auth)
+    const cliResult = healWithClaudeCli(prompt);
+    if (cliResult)
+        return cliResult;
+    // 2. Try Anthropic API (works in VS Code Copilot or any environment with key)
+    if (process.env.ANTHROPIC_API_KEY) {
+        console.log('  ℹ claude CLI unavailable — using Anthropic API');
+        const apiResult = await healWithAnthropicApi(prompt);
+        if (apiResult)
+            return apiResult;
     }
-    if (result.status !== 0) {
-        console.warn(`  ⚠ claude CLI exited ${result.status}: ${result.stderr?.trim()}`);
-        return null;
+    else {
+        console.warn('  ⚠ claude CLI not found and ANTHROPIC_API_KEY not set — skipping LLM healing');
+        console.warn('    Set ANTHROPIC_API_KEY to enable healing without Claude Code CLI');
     }
-    try {
-        const outer = JSON.parse(result.stdout.trim());
-        // --output-format json wraps response in { result: "..." }
-        const inner = typeof outer.result === 'string' ? JSON.parse(outer.result) : outer;
-        if (typeof inner.css === 'string' && typeof inner.xpath === 'string') {
-            return { css: inner.css, xpath: inner.xpath, reasoning: inner.reasoning ?? '' };
-        }
-        return null;
-    }
-    catch (e) {
-        console.warn(`  ⚠ Could not parse LLM response: ${e.message}`);
-        return null;
-    }
+    return null;
 }

@@ -2,7 +2,15 @@
   "name": "flint",
   "version": "1.0.0",
   "description": "Hybrid browser automation: LLM + manual recording on a shared live browser, flow replay with LLM self-healing, and resilient CSS/XPath locator generation.",
-  "keywords": ["playwright", "browser-automation", "mcp", "claude", "testing", "flow-recording", "self-healing"],
+  "keywords": [
+    "playwright",
+    "browser-automation",
+    "mcp",
+    "claude",
+    "testing",
+    "flow-recording",
+    "self-healing"
+  ],
   "license": "MIT",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -22,6 +30,7 @@
     "pom": "ts-node src/pom-generator.ts"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.80.0",
     "js-yaml": "^4.1.0",
     "playwright": "^1.49.0"
   },

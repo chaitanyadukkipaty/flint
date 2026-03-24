@@ -24,4 +24,5 @@ export interface LocatorEntry {
 }
 export declare function generateLocators(page: Page): Promise<LocatorEntry[]>;
 export declare function formatLocators(entries: LocatorEntry[], url: string, title: string): string;
+export declare function runCli(): Promise<void>;
 //# sourceMappingURL=pom-generator.d.ts.map

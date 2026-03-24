@@ -33,6 +33,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.runCli = runCli;
 /**
  * flow-player.ts
  * Replays a flow YAML file step by step using Playwright.
@@ -150,12 +151,14 @@ async function executeStep(page, step) {
             console.warn(`  Unknown action: ${step.action}`);
     }
 }
-// CLI
-if (require.main === module) {
+function runCli() {
     const flowPath = process.argv[2];
     if (!flowPath) {
-        console.error('Usage: ts-node src/flow-player.ts <flow-file.yaml>');
+        console.error('Usage: flint replay <flow-file.yaml>');
         process.exit(1);
     }
     replay(path.resolve(flowPath)).catch(console.error);
+}
+if (require.main === module) {
+    runCli();
 }
