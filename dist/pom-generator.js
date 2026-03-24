@@ -285,8 +285,7 @@ function formatLocators(entries, url, title, sectionSelector) {
     return header + '\n' + lines.join('\n\n');
 }
 async function runCli() {
-    const { chromium } = require('playwright');
-    const { stealthArgs, applyStealthToContext } = require('./stealth');
+    const { stealthChromium: chromium, stealthArgs, stealthContextOptions, applyStealthToContext } = require('./stealth');
     const args = process.argv.slice(2);
     const sectionFlagIdx = args.findIndex(a => a === '--section' || a.startsWith('--section='));
     const wantsSection = sectionFlagIdx !== -1;
@@ -297,11 +296,7 @@ async function runCli() {
     const url = urlArgs[0] ?? 'https://example.com';
     const browser = await chromium.launch({ headless: false, channel: 'chrome', args: stealthArgs() })
         .catch(() => chromium.launch({ headless: false, args: stealthArgs() }));
-    const context = await browser.newContext({
-        userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-        viewport: { width: 1280, height: 800 },
-        locale: 'en-US',
-    });
+    const context = await browser.newContext(stealthContextOptions);
     await applyStealthToContext(context);
     const page = await context.newPage();
     await page.goto(url, { waitUntil: 'networkidle' });

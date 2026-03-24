@@ -34,15 +34,6 @@ var __importStar = (this && this.__importStar) || (function () {
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.runCli = runCli;
-/**
- * flow-player.ts
- * Replays a flow YAML file step by step using Playwright.
- * On step failure, asks the LLM for an alternative locator (healing),
- * retries the step, and saves the corrected locator back to the YAML.
- *
- * Usage: ts-node src/flow-player.ts flows/my-flow.yaml
- */
-const playwright_1 = require("playwright");
 const fs = __importStar(require("fs"));
 const yaml = __importStar(require("js-yaml"));
 const path = __importStar(require("path"));
@@ -62,13 +53,9 @@ async function replay(flowPath) {
         return !(prev?.action === 'navigate' && prev.url === step.url);
     });
     console.log(`\nReplaying: ${flow.name} (${steps.length} steps, ${flow.steps.length - steps.length} duplicates skipped)\n`);
-    const browser = await playwright_1.chromium.launch({ headless: false, slowMo: 300, channel: 'chrome', args: (0, stealth_1.stealthArgs)() })
-        .catch(() => playwright_1.chromium.launch({ headless: false, slowMo: 300, args: (0, stealth_1.stealthArgs)() }));
-    const context = await browser.newContext({
-        userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-        viewport: { width: 1280, height: 800 },
-        locale: 'en-US',
-    });
+    const browser = await stealth_1.stealthChromium.launch({ headless: false, slowMo: 300, channel: 'chrome', args: (0, stealth_1.stealthArgs)() })
+        .catch(() => stealth_1.stealthChromium.launch({ headless: false, slowMo: 300, args: (0, stealth_1.stealthArgs)() }));
+    const context = await browser.newContext(stealth_1.stealthContextOptions);
     await (0, stealth_1.applyStealthToContext)(context);
     const page = await context.newPage();
     let flowMutated = false;

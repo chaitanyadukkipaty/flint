@@ -9,7 +9,7 @@
  *   npm run session                  # auto-named flow
  *   npm run session -- "login flow"  # named flow
  */
-import { chromium } from 'playwright';
+import { stealthChromium as chromium, stealthArgs, stealthContextOptions, applyStealthToContext } from './stealth';
 import * as net from 'net';
 import * as path from 'path';
 import * as fs from 'fs';
@@ -17,7 +17,6 @@ import * as http from 'http';
 import { FlowRecorder } from './flow-recorder';
 import { attachManualCapture } from './manual-capture';
 import { generateLocators, formatLocators, pickSection } from './pom-generator';
-import { stealthArgs, applyStealthToContext } from './stealth';
 
 const FLOW_DIR = path.join(process.cwd(), 'flows');
 const SCREENSHOT_DIR = path.join(FLOW_DIR, 'screenshots');
@@ -106,30 +105,15 @@ async function main() {
   const browser = await chromium.launch({
     headless: false,
     channel: 'chrome',
-    args: [
-      `--remote-debugging-port=${cdpPort}`,
-      '--no-first-run',
-      '--disable-default-apps',
-      ...stealthArgs(),
-    ],
+    args: stealthArgs([`--remote-debugging-port=${cdpPort}`]),
   }).catch(() =>
-    // Fall back to bundled Chromium if Chrome is not installed
     chromium.launch({
       headless: false,
-      args: [
-        `--remote-debugging-port=${cdpPort}`,
-        '--no-first-run',
-        '--disable-default-apps',
-        ...stealthArgs(),
-      ],
+      args: stealthArgs([`--remote-debugging-port=${cdpPort}`]),
     })
   );
 
-  const context = await browser.newContext({
-    userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-    viewport: { width: 1280, height: 800 },
-    locale: 'en-US',
-  });
+  const context = await browser.newContext(stealthContextOptions);
   await applyStealthToContext(context);
   const page = await context.newPage();
 

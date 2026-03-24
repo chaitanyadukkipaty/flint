@@ -1,14 +1,25 @@
 /**
  * stealth.ts
- * Hides Playwright automation signals so websites treat the browser
- * as a regular user session rather than a scraping bot.
+ * Uses playwright-extra + puppeteer-extra-plugin-stealth for comprehensive
+ * bot-detection evasion, plus additional patches for aggressive sites
+ * like BrowserStack that probe hardware/WebGL/CDP signals.
  */
 import { BrowserContext } from 'playwright';
-/** Extra CLI flags for chromium.launch({ args: stealthArgs() }) */
-export declare function stealthArgs(): string[];
+export declare const stealthChromium: any;
+/** Extra CLI flags for chromium.launch() */
+export declare function stealthArgs(extraPorts?: string[]): string[];
+/** Context options that look like a real Chrome session */
+export declare const stealthContextOptions: {
+    userAgent: string;
+    viewport: {
+        width: number;
+        height: number;
+    };
+    locale: string;
+};
 /**
- * Apply stealth init scripts to an existing BrowserContext.
- * Call immediately after browser.newContext().
+ * Extra patches on top of the stealth plugin for sites that probe
+ * hardware/WebGL/CDP-specific signals (e.g. BrowserStack, Cloudflare).
  */
 export declare function applyStealthToContext(context: BrowserContext): Promise<void>;
 //# sourceMappingURL=stealth.d.ts.map

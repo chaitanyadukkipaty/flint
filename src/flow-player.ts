@@ -6,13 +6,13 @@
  *
  * Usage: ts-node src/flow-player.ts flows/my-flow.yaml
  */
-import { chromium, Page } from 'playwright';
+import { Page } from 'playwright';
 import * as fs from 'fs';
 import * as yaml from 'js-yaml';
 import * as path from 'path';
 import { FlowFile, FlowStep } from './flow-recorder';
 import { healStep } from './llm-healer';
-import { stealthArgs, applyStealthToContext } from './stealth';
+import { stealthChromium, stealthArgs, stealthContextOptions, applyStealthToContext } from './stealth';
 
 async function replay(flowPath: string) {
   if (!fs.existsSync(flowPath)) {
@@ -31,13 +31,9 @@ async function replay(flowPath: string) {
 
   console.log(`\nReplaying: ${flow.name} (${steps.length} steps, ${flow.steps.length - steps.length} duplicates skipped)\n`);
 
-  const browser = await chromium.launch({ headless: false, slowMo: 300, channel: 'chrome', args: stealthArgs() })
-    .catch(() => chromium.launch({ headless: false, slowMo: 300, args: stealthArgs() }));
-  const context = await browser.newContext({
-    userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-    viewport: { width: 1280, height: 800 },
-    locale: 'en-US',
-  });
+  const browser = await stealthChromium.launch({ headless: false, slowMo: 300, channel: 'chrome', args: stealthArgs() })
+    .catch(() => stealthChromium.launch({ headless: false, slowMo: 300, args: stealthArgs() }));
+  const context = await browser.newContext(stealthContextOptions);
   await applyStealthToContext(context);
   const page = await context.newPage();
 
