@@ -16,7 +16,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { spawnSync } from 'child_process';
 import { Page } from 'playwright';
-import { LocatorEntry } from './pom-generator';
+import { LocatorEntry, generateLocators } from './pom-generator';
 import { loadConfig } from './config';
 
 export interface LLMLocatorResult {
@@ -268,14 +268,20 @@ async function suggestWithGitHubModels(prompt: string): Promise<LLMLocatorResult
       res.on('data', (c: string) => data += c);
       res.on('end', () => {
         try {
-          const text = JSON.parse(data).choices?.[0]?.message?.content?.trim() ?? '';
+          const parsed = JSON.parse(data);
+          if (parsed.error) {
+            console.warn(`  [GitHub Models] API error: ${parsed.error.message ?? JSON.stringify(parsed.error)}`);
+            resolve(null); return;
+          }
+          const text = parsed.choices?.[0]?.message?.content?.trim() ?? '';
           const raw = parseLocators(text);
+          if (!raw) console.warn('  [GitHub Models] could not parse JSON from response');
           resolve(raw ? normalise(raw) : null);
-        } catch { resolve(null); }
+        } catch (e: any) { console.warn(`  [GitHub Models] response parse error: ${e.message}`); resolve(null); }
       });
     });
-    req.on('error', () => resolve(null));
-    req.setTimeout(30_000, () => { req.destroy(); resolve(null); });
+    req.on('error', (e: any) => { console.warn(`  [GitHub Models] request error: ${e.message}`); resolve(null); });
+    req.setTimeout(30_000, () => { console.warn('  [GitHub Models] request timed out'); req.destroy(); resolve(null); });
     req.write(body); req.end();
   });
 }
@@ -318,6 +324,7 @@ export async function suggestLocatorsWithLLM(
     }
   }
 
-  console.warn('  ⚠ LLM suggestion failed — falling back to code-based locators.');
-  return { entries: [], reasoning: 'LLM unavailable.' };
+  console.warn('  ⚠ LLM unavailable — using code-based locators.');
+  const entries = await generateLocators(page, sectionSelector);
+  return { entries, reasoning: 'LLM unavailable — code-based locators shown.' };
 }
