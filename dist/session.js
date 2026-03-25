@@ -88,7 +88,7 @@ function restoreMcpJson() {
 /** Fetch the Chrome WS debugger URL from the CDP HTTP endpoint */
 function getCdpWsUrl(cdpPort) {
     return new Promise((resolve, reject) => {
-        http.get(`http://localhost:${cdpPort}/json/version`, res => {
+        http.get(`http://127.0.0.1:${cdpPort}/json/version`, res => {
             let data = '';
             res.on('data', chunk => data += chunk);
             res.on('end', () => {
