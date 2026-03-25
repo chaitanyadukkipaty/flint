@@ -102,6 +102,26 @@ function getCdpWsUrl(cdpPort) {
         }).on('error', reject);
     });
 }
+/** Resolve a CDP URL (http endpoint or ws URL) to a WebSocket debugger URL */
+function resolveWsUrl(cdpUrl) {
+    if (cdpUrl.startsWith('ws'))
+        return Promise.resolve(cdpUrl);
+    const base = cdpUrl.replace(/\/$/, '');
+    return new Promise((resolve, reject) => {
+        http.get(`${base}/json/version`, res => {
+            let data = '';
+            res.on('data', chunk => data += chunk);
+            res.on('end', () => {
+                try {
+                    resolve(JSON.parse(data).webSocketDebuggerUrl);
+                }
+                catch {
+                    reject(new Error(`Could not parse CDP /json/version from ${base}`));
+                }
+            });
+        }).on('error', reject);
+    });
+}
 function getFreePort() {
     return new Promise((resolve, reject) => {
         const srv = net.createServer();
@@ -114,6 +134,7 @@ function getFreePort() {
 }
 async function main() {
     const useLLM = process.env.FLINT_LLM === '1' || process.env.FLINT_LLM === 'true';
+    const externalCdpUrl = process.env.FLINT_CDP_URL ?? '';
     const flowName = process.argv[2] ?? `flow-${Date.now()}`;
     const flowSlug = flowName.replace(/\s+/g, '-');
     const flowPath = path.join(FLOW_DIR, `${flowSlug}.yaml`);
@@ -122,43 +143,83 @@ async function main() {
     console.log(`\n🌐 Starting browser session: ${flowName}`);
     console.log(`📄 Recording to: ${flowPath}`);
     console.log(`🤖 LLM locator suggestions: ${useLLM ? 'ON  (use l / sl to trigger)' : 'OFF (pass --llm to enable)'}\n`);
-    // 1. Get a free port for Chrome's remote debugging (real CDP)
-    const cdpPort = await getFreePort();
-    const cdpEndpoint = `http://localhost:${cdpPort}`;
-    // 2. Launch Chrome using a persistent user-data-dir so the browser
-    //    looks like a real returning user (cookies, history, profile signals).
-    //    Falls back to bundled Chromium if Chrome is not installed.
-    const profileDir = path.join(os.homedir(), '.flint', 'chrome-profile');
-    fs.mkdirSync(profileDir, { recursive: true });
-    // Remove stale SingletonLock so a new session can start even if a previous one crashed
-    const lockFile = path.join(profileDir, 'SingletonLock');
-    if (fs.existsSync(lockFile)) {
-        try {
-            fs.unlinkSync(lockFile);
-        }
-        catch { }
-    }
-    const launchOpts = {
-        channel: 'chrome',
-        headless: false,
-        args: (0, stealth_1.stealthArgs)([`--remote-debugging-port=${cdpPort}`]),
-        ...stealth_1.stealthContextOptions,
-    };
     let context;
     let page;
-    try {
-        context = await stealth_1.stealthChromium.launchPersistentContext(profileDir, launchOpts);
+    let externalBrowser = null;
+    if (externalCdpUrl) {
+        // --- Attach to existing browser via CDP ---
+        console.log(`🔗 Attaching to existing browser at: ${externalCdpUrl}`);
+        const wsUrl = await resolveWsUrl(externalCdpUrl);
+        const { chromium: baseChromium } = require('playwright');
+        externalBrowser = await baseChromium.connectOverCDP(wsUrl);
+        context = externalBrowser.contexts()[0] ?? await externalBrowser.newContext();
+        writeMcpJson(wsUrl);
+        console.log('✅ Attached to browser.');
+        console.log('✅ .mcp.json updated with CDP endpoint.');
+        console.log('   Reload MCP in Claude Code (/mcp → Reconnect playwright).');
+        console.log(`   Then use /browser freely on this browser.\n`);
+        console.log('─'.repeat(60));
+        console.log(`   CDP: ${externalCdpUrl}`);
+        console.log('─'.repeat(60));
     }
-    catch {
-        // Chrome not installed — fall back to bundled Chromium
-        const { channel: _c, ...chromiumOpts } = launchOpts;
-        context = await stealth_1.stealthChromium.launchPersistentContext(profileDir, chromiumOpts);
+    else {
+        // --- Launch new browser ---
+        // 1. Get a free port for Chrome's remote debugging (real CDP)
+        const cdpPort = await getFreePort();
+        const cdpEndpoint = `http://localhost:${cdpPort}`;
+        // 2. Launch Chrome using a persistent user-data-dir so the browser
+        //    looks like a real returning user (cookies, history, profile signals).
+        //    Falls back to bundled Chromium if Chrome is not installed.
+        const profileDir = path.join(os.homedir(), '.flint', 'chrome-profile');
+        fs.mkdirSync(profileDir, { recursive: true });
+        // Remove stale SingletonLock so a new session can start even if a previous one crashed
+        const lockFile = path.join(profileDir, 'SingletonLock');
+        if (fs.existsSync(lockFile)) {
+            try {
+                fs.unlinkSync(lockFile);
+            }
+            catch { }
+        }
+        const launchOpts = {
+            channel: 'chrome',
+            headless: false,
+            args: (0, stealth_1.stealthArgs)([`--remote-debugging-port=${cdpPort}`]),
+            ...stealth_1.stealthContextOptions,
+        };
+        try {
+            context = await stealth_1.stealthChromium.launchPersistentContext(profileDir, launchOpts);
+        }
+        catch {
+            // Chrome not installed — fall back to bundled Chromium
+            const { channel: _c, ...chromiumOpts } = launchOpts;
+            context = await stealth_1.stealthChromium.launchPersistentContext(profileDir, chromiumOpts);
+        }
+        await (0, stealth_1.applyStealthToContext)(context);
+        // Fetch the WS debugger URL and auto-update .mcp.json
+        // Chrome needs a moment to expose the CDP HTTP endpoint after launch
+        await new Promise(r => setTimeout(r, 500));
+        const wsDebuggerUrl = await getCdpWsUrl(cdpPort);
+        writeMcpJson(wsDebuggerUrl);
+        console.log('✅ .mcp.json updated with CDP endpoint.');
+        console.log('   Reload MCP in Claude Code (/mcp → Reconnect playwright).');
+        console.log(`   Then use /browser freely on this browser.\n`);
+        console.log('─'.repeat(60));
+        console.log(`   CDP: ${cdpEndpoint}`);
+        console.log('─'.repeat(60));
     }
-    await (0, stealth_1.applyStealthToContext)(context);
+    console.log('');
+    console.log('Commands (type in this terminal):');
+    console.log('  locators  (l)   → resilient locators for current page');
+    console.log('  section   (sl)  → pick a section visually, then show scoped locators');
+    console.log('  save      (s)   → confirm flow is saved');
+    console.log('  quit      (q)   → end session + restore .mcp.json');
+    if (useLLM)
+        console.log('  [LLM mode]      → locators will be filtered by LLM after capture');
+    console.log('');
     page = context.pages()[0] ?? await context.newPage();
-    // 3. Initialize recorder
+    // Initialize recorder
     const recorder = new flow_recorder_1.FlowRecorder(flowPath, flowName);
-    // 4. Attach manual capture to the initial page
+    // Attach manual capture to the initial page
     const cleanupFns = [];
     cleanupFns.push(await (0, manual_capture_1.attachManualCapture)(page, recorder, SCREENSHOT_DIR, useLLM));
     // Track the most recently active page so l/sl commands operate on the live tab.
@@ -173,26 +234,13 @@ async function main() {
         });
     };
     context.on('page', trackPage);
-    // 5. Fetch the WS debugger URL and auto-update .mcp.json
-    // Chrome needs a moment to expose the CDP HTTP endpoint after launch
-    await new Promise(r => setTimeout(r, 500));
-    const wsDebuggerUrl = await getCdpWsUrl(cdpPort);
-    writeMcpJson(wsDebuggerUrl);
-    console.log('✅ .mcp.json updated with CDP endpoint.');
-    console.log('   Reload MCP in Claude Code (/mcp → Reconnect playwright).');
-    console.log(`   Then use /browser freely on this browser.\n`);
-    console.log('─'.repeat(60));
-    console.log(`   CDP: ${cdpEndpoint}`);
-    console.log('─'.repeat(60));
-    console.log('');
-    console.log('Commands (type in this terminal):');
-    console.log('  locators  (l)   → resilient locators for current page');
-    console.log('  section   (sl)  → pick a section visually, then show scoped locators');
-    console.log('  save      (s)   → confirm flow is saved');
-    console.log('  quit      (q)   → end session + restore .mcp.json');
-    if (useLLM)
-        console.log('  [LLM mode]      → locators will be filtered by LLM after capture');
-    console.log('');
+    // Auto-shutdown if the external framework closes the browser
+    if (externalBrowser) {
+        externalBrowser.on('disconnected', () => {
+            console.log('\nBrowser disconnected — shutting down.');
+            shutdown();
+        });
+    }
     // 6. REPL
     process.stdin.setEncoding('utf8');
     process.stdin.resume();
@@ -254,7 +302,17 @@ async function main() {
         console.log('\nShutting down...');
         await Promise.all(cleanupFns.map(fn => Promise.resolve(fn())));
         restoreMcpJson();
-        await context.close();
+        if (externalCdpUrl) {
+            // Disconnect from external browser without closing it
+            try {
+                await externalBrowser?.close();
+            }
+            catch { }
+            console.log('Detached from browser (browser left open).');
+        }
+        else {
+            await context.close();
+        }
         console.log(`Flow saved: ${flowPath} (${recorder.getStepCount()} steps)`);
         console.log('.mcp.json restored.\n');
         process.exit(0);

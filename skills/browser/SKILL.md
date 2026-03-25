@@ -264,6 +264,22 @@ element_name         CSS: selector                        [score] ⚠
 
 All actions are recorded automatically to `flows/`. Manual user actions are captured via CDP listeners in the same file.
 
+### Step Descriptions
+
+Before **every** browser action you perform (navigate, click, type, etc.), set a human-readable description so it is saved in the flow YAML. Do this by running:
+
+```javascript
+async (page) => { await page.evaluate(() => { window.__flintStepDesc__ = 'Your description here'; }); }
+```
+
+Examples:
+- Before navigating: `window.__flintStepDesc__ = 'Navigate to GitHub homepage'`
+- Before clicking: `window.__flintStepDesc__ = 'Click Sign In button'`
+- Before typing: `window.__flintStepDesc__ = 'Type search query in search box'`
+- Before selecting: `window.__flintStepDesc__ = 'Select "Monthly" from billing period dropdown'`
+
+The description is consumed and cleared automatically after the next recorded action, so always set it immediately before the action it describes.
+
 ## Completing the Task
 
 When done:
