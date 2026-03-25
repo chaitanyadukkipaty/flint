@@ -126,28 +126,28 @@ options.addArguments('remote-debugging-port=9222');  // ← add this line
 
 ### Nightwatch (`nightwatch.conf.js` / `.ts`)
 
-Find `desiredCapabilities`. Add or extend `chromeOptions`:
+Find `desiredCapabilities`. Add or extend `'goog:chromeOptions'`:
 
-**Note:** Nightwatch uses `chromeOptions`, NOT `goog:chromeOptions`.
+**Note:** Use `'goog:chromeOptions'` (with the vendor prefix) — modern ChromeDriver (75+) silently ignores the old `chromeOptions` key.
 
-**If `chromeOptions.args` exists:**
+**If `'goog:chromeOptions'` with `args` exists:**
 ```javascript
 args: ['--existing-arg', '--remote-debugging-port=9222']
 ```
 
-**If `chromeOptions` exists but no `args`:**
+**If `'goog:chromeOptions'` exists but no `args`:**
 ```javascript
-chromeOptions: {
+'goog:chromeOptions': {
   // existing...
   args: ['--remote-debugging-port=9222'],
 },
 ```
 
-**If no `chromeOptions`** (add inside `desiredCapabilities`):
+**If no `'goog:chromeOptions'`** (add inside `desiredCapabilities`):
 ```javascript
 desiredCapabilities: {
   browserName: 'chrome',
-  chromeOptions: {
+  'goog:chromeOptions': {
     args: ['--remote-debugging-port=9222'],
   },
 },

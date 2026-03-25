@@ -35,10 +35,10 @@ options.addArguments('remote-debugging-port=${PORT}');`,
   nightwatch: {
     file: 'nightwatch.conf.js',
     snippet: `// In nightwatch.conf.js, add to desiredCapabilities:
-// (Note: Nightwatch uses 'chromeOptions', not 'goog:chromeOptions')
+// (Use 'goog:chromeOptions' — modern ChromeDriver ignores the old 'chromeOptions' key)
 desiredCapabilities: {
   browserName: 'chrome',
-  chromeOptions: {
+  'goog:chromeOptions': {
     args: ['--remote-debugging-port=${PORT}'],
   },
 },`,
