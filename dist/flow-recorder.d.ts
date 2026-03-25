@@ -5,6 +5,7 @@ export interface FlowStep {
     actor: Actor;
     action: ActionType;
     timestamp: string;
+    description?: string;
     url?: string;
     element?: {
         name: string;

@@ -53,8 +53,8 @@ const http = __importStar(require("http"));
 const flow_recorder_1 = require("./flow-recorder");
 const manual_capture_1 = require("./manual-capture");
 const pom_generator_1 = require("./pom-generator");
+const llm_locator_1 = require("./llm-locator");
 const FLOW_DIR = path.join(process.cwd(), 'flows');
-const SCREENSHOT_DIR = path.join(FLOW_DIR, 'screenshots');
 const MCP_JSON = path.join(process.cwd(), '.mcp.json');
 const VSCODE_MCP_JSON = path.join(process.cwd(), '.vscode', 'mcp.json');
 // Shell wrapper that sources nvm and runs @playwright/mcp under Node 18+
@@ -113,11 +113,15 @@ function getFreePort() {
     });
 }
 async function main() {
-    fs.mkdirSync(SCREENSHOT_DIR, { recursive: true });
+    const useLLM = process.env.FLINT_LLM === '1' || process.env.FLINT_LLM === 'true';
     const flowName = process.argv[2] ?? `flow-${Date.now()}`;
-    const flowPath = path.join(FLOW_DIR, `${flowName.replace(/\s+/g, '-')}.yaml`);
+    const flowSlug = flowName.replace(/\s+/g, '-');
+    const flowPath = path.join(FLOW_DIR, `${flowSlug}.yaml`);
+    const SCREENSHOT_DIR = path.join(FLOW_DIR, 'screenshots', flowSlug);
+    fs.mkdirSync(SCREENSHOT_DIR, { recursive: true });
     console.log(`\n🌐 Starting browser session: ${flowName}`);
-    console.log(`📄 Recording to: ${flowPath}\n`);
+    console.log(`📄 Recording to: ${flowPath}`);
+    console.log(`🤖 LLM locator suggestions: ${useLLM ? 'ON  (use l / sl to trigger)' : 'OFF (pass --llm to enable)'}\n`);
     // 1. Get a free port for Chrome's remote debugging (real CDP)
     const cdpPort = await getFreePort();
     const cdpEndpoint = `http://localhost:${cdpPort}`;
@@ -126,6 +130,14 @@ async function main() {
     //    Falls back to bundled Chromium if Chrome is not installed.
     const profileDir = path.join(os.homedir(), '.flint', 'chrome-profile');
     fs.mkdirSync(profileDir, { recursive: true });
+    // Remove stale SingletonLock so a new session can start even if a previous one crashed
+    const lockFile = path.join(profileDir, 'SingletonLock');
+    if (fs.existsSync(lockFile)) {
+        try {
+            fs.unlinkSync(lockFile);
+        }
+        catch { }
+    }
     const launchOpts = {
         channel: 'chrome',
         headless: false,
@@ -147,7 +159,7 @@ async function main() {
     // 3. Initialize recorder
     const recorder = new flow_recorder_1.FlowRecorder(flowPath, flowName);
     // 4. Attach manual capture
-    const cleanup = await (0, manual_capture_1.attachManualCapture)(page, recorder, SCREENSHOT_DIR);
+    const cleanup = await (0, manual_capture_1.attachManualCapture)(page, recorder, SCREENSHOT_DIR, useLLM);
     // 5. Fetch the WS debugger URL and auto-update .mcp.json
     // Chrome needs a moment to expose the CDP HTTP endpoint after launch
     await new Promise(r => setTimeout(r, 500));
@@ -165,6 +177,8 @@ async function main() {
     console.log('  section   (sl)  → pick a section visually, then show scoped locators');
     console.log('  save      (s)   → confirm flow is saved');
     console.log('  quit      (q)   → end session + restore .mcp.json');
+    if (useLLM)
+        console.log('  [LLM mode]      → locators will be filtered by LLM after capture');
     console.log('');
     // 6. REPL
     process.stdin.setEncoding('utf8');
@@ -173,8 +187,16 @@ async function main() {
         const cmd = input.trim().toLowerCase();
         if (cmd === 'locators' || cmd === 'l') {
             try {
-                const entries = await (0, pom_generator_1.generateLocators)(page);
-                console.log('\n' + (0, pom_generator_1.formatLocators)(entries, page.url(), await page.title()) + '\n');
+                if (useLLM) {
+                    const { entries, reasoning } = await (0, llm_locator_1.suggestLocatorsWithLLM)(page, SCREENSHOT_DIR);
+                    if (reasoning)
+                        console.log(`  Reasoning: ${reasoning}`);
+                    console.log('\n' + (0, pom_generator_1.formatLocators)(entries, page.url(), await page.title()) + '\n');
+                }
+                else {
+                    const entries = await (0, pom_generator_1.generateLocators)(page);
+                    console.log('\n' + (0, pom_generator_1.formatLocators)(entries, page.url(), await page.title()) + '\n');
+                }
             }
             catch (e) {
                 console.error('Could not get locators:', e.message);
@@ -182,12 +204,24 @@ async function main() {
         }
         else if (cmd === 'section' || cmd === 'sl') {
             try {
-                const selector = await (0, pom_generator_1.pickSection)(page);
-                const sectionDesc = selector ?? 'full page';
-                if (!selector)
-                    console.log('  No section selected — using full page.\n');
-                const entries = await (0, pom_generator_1.generateLocators)(page, selector ?? undefined);
-                console.log('\n' + (0, pom_generator_1.formatLocators)(entries, page.url(), await page.title(), selector ?? undefined) + '\n');
+                if (useLLM) {
+                    // Section picker still lets user visually select the area,
+                    // but LLM generates the locators from SS + DOM context of that section
+                    const { selector } = await (0, pom_generator_1.pickSection)(page);
+                    if (!selector)
+                        console.log('  No section selected — using full page.\n');
+                    const { entries, reasoning } = await (0, llm_locator_1.suggestLocatorsWithLLM)(page, SCREENSHOT_DIR, selector ?? undefined);
+                    if (reasoning)
+                        console.log(`  Reasoning: ${reasoning}`);
+                    console.log('\n' + (0, pom_generator_1.formatLocators)(entries, page.url(), await page.title(), selector ?? undefined) + '\n');
+                }
+                else {
+                    const { selector, entries: raw } = await (0, pom_generator_1.pickSection)(page);
+                    if (!selector)
+                        console.log('  No section selected — using full page.\n');
+                    const entries = raw.sort((a, b) => b.resilience - a.resilience);
+                    console.log('\n' + (0, pom_generator_1.formatLocators)(entries, page.url(), await page.title(), selector ?? undefined) + '\n');
+                }
             }
             catch (e) {
                 console.error('Could not get section locators:', e.message);

@@ -1,10 +1,36 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.attachManualCapture = attachManualCapture;
-async function attachManualCapture(page, recorder, screenshotDir) {
+async function attachManualCapture(page, recorder, screenshotDir, useLLM = false) {
     // Track accumulated keystrokes per element to merge into a single 'type' step
-    let typeBuffer = { selector: '', value: '', name: '', css: '', xpath: '' };
+    let typeBuffer = { selector: '', value: '', name: '', css: '', xpath: '', desc: '' };
     let typeTimer = null;
+    /** Read and clear the LLM-set step description from the page (set via window.__flintStepDesc__) */
+    const popStepDesc = async () => {
+        try {
+            return await page.evaluate(() => {
+                const d = window.__flintStepDesc__ ?? '';
+                window.__flintStepDesc__ = '';
+                return d;
+            });
+        }
+        catch {
+            return '';
+        }
+    };
+    /** Auto-generate a human-readable description from captured step data */
+    function autoDesc(action, elementName, value, url, key) {
+        const label = elementName?.replace(/_/g, ' ') ?? 'element';
+        if (action === 'navigate' && url)
+            return `Navigate to ${url}`;
+        if (action === 'click')
+            return `Click ${label}`;
+        if (action === 'type' && value)
+            return `Type "${value}" in ${label}`;
+        if (action === 'keypress' && key)
+            return `Press ${key}`;
+        return '';
+    }
     const safeTitle = async () => {
         try {
             return await page.title();
@@ -23,13 +49,15 @@ async function attachManualCapture(page, recorder, screenshotDir) {
         if (!typeBuffer.value)
             return;
         const buf = { ...typeBuffer };
-        typeBuffer = { selector: '', value: '', name: '', css: '', xpath: '' };
+        typeBuffer = { selector: '', value: '', name: '', css: '', xpath: '', desc: '' };
         const stepId = recorder.getStepCount() + 1;
         const ssPath = `${screenshotDir}/step_${String(stepId).padStart(3, '0')}.png`;
         await safeScreenshot(ssPath);
+        const description = buf.desc || (useLLM ? autoDesc('type', buf.name, buf.value) : undefined);
         recorder.append({
             actor: 'user',
             action: 'type',
+            ...(description ? { description } : {}),
             element: { name: buf.name, css: buf.css, xpath: buf.xpath, resilience: 0 },
             value: buf.value,
             context: { title: await safeTitle(), screenshot: ssPath },
@@ -57,9 +85,12 @@ async function attachManualCapture(page, recorder, screenshotDir) {
             const stepId = recorder.getStepCount() + 1;
             const ssPath = `${screenshotDir}/step_${String(stepId).padStart(3, '0')}.png`;
             await safeScreenshot(ssPath);
+            const navDesc = await popStepDesc();
+            const description = navDesc || (useLLM ? autoDesc('navigate', undefined, undefined, finalUrl) : undefined);
             recorder.append({
                 actor: 'user',
                 action: 'navigate',
+                ...(description ? { description } : {}),
                 url: finalUrl,
                 context: {
                     title: await safeTitle(),
@@ -105,9 +136,12 @@ async function attachManualCapture(page, recorder, screenshotDir) {
                 const stepId = recorder.getStepCount() + 1;
                 const ssPath = `${screenshotDir}/step_${String(stepId).padStart(3, '0')}.png`;
                 await safeScreenshot(ssPath);
+                const clickDesc = await popStepDesc();
+                const description = clickDesc || (useLLM ? autoDesc('click', name) : undefined);
                 recorder.append({
                     actor: 'user',
                     action: 'click',
+                    ...(description ? { description } : {}),
                     element: { name, css, xpath, resilience },
                     context: { title: await safeTitle(), screenshot: ssPath },
                 });
@@ -118,7 +152,8 @@ async function attachManualCapture(page, recorder, screenshotDir) {
             await flushType();
             try {
                 const { key } = JSON.parse(text.slice('__CAPTURE_KEY__'.length));
-                recorder.append({ actor: 'user', action: 'keypress', key });
+                const keyDesc = useLLM ? autoDesc('keypress', undefined, undefined, undefined, key) : undefined;
+                recorder.append({ actor: 'user', action: 'keypress', ...(keyDesc ? { description: keyDesc } : {}), key });
             }
             catch { }
         }
@@ -132,6 +167,7 @@ async function attachManualCapture(page, recorder, screenshotDir) {
             typeBuffer.css = info.css;
             typeBuffer.xpath = info.xpath;
             typeBuffer.value = '';
+            typeBuffer.desc = await popStepDesc(); // capture LLM-set desc when typing starts
         }
         typeBuffer.value = info.value;
         if (typeTimer)

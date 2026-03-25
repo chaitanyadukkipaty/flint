@@ -6,5 +6,5 @@
  */
 import { Page } from 'playwright';
 import { FlowRecorder } from './flow-recorder';
-export declare function attachManualCapture(page: Page, recorder: FlowRecorder, screenshotDir: string): Promise<() => void>;
+export declare function attachManualCapture(page: Page, recorder: FlowRecorder, screenshotDir: string, useLLM?: boolean): Promise<() => void>;
 //# sourceMappingURL=manual-capture.d.ts.map

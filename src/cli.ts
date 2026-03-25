@@ -17,6 +17,8 @@ flint <command> [args]
 Commands:
   init                  Set up skills + .mcp.json in the current project
   session [name]        Start a hybrid browser session (LLM + manual, recorded)
+  session:llm [name]    Same as session but with LLM locator suggestions enabled
+  session --llm [name]  Same as above
   replay <flow.yaml>    Replay a flow YAML with LLM self-healing on failure
   pom [url]             Print resilient CSS/XPath locators for a page
 
@@ -33,9 +35,14 @@ switch (cmd) {
     require('./init');
     break;
   case 'session':
-    if (args[0]) process.argv[2] = args[0];
+  case 'session:llm': {
+    const llmFlag = args.includes('--llm') || cmd === 'session:llm';
+    if (llmFlag) process.env.FLINT_LLM = '1';
+    const nameArg = args.find(a => !a.startsWith('--'));
+    if (nameArg) process.argv[2] = nameArg;
     require('./session');
     break;
+  }
   case 'replay': {
     if (!args[0]) { console.error('Usage: flint replay <flow.yaml>'); process.exit(1); }
     process.argv[2] = args[0];

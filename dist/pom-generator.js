@@ -9,30 +9,56 @@ exports.runCli = runCli;
  * Returns a unique CSS selector for the clicked element.
  */
 async function pickSection(page) {
-    console.log('\n  Click on a section to scope locator generation. Press Escape to use full page.\n');
+    console.log('\n  Section picker active — hover to highlight, click to select.');
+    console.log('  Click the [⏸ Pause Picker] button (top-right) to open hover menus, then Resume.\n');
     return page.evaluate(() => new Promise(resolve => {
-        const overlay = document.createElement('div');
-        overlay.id = '__flint_section_picker__';
-        overlay.style.cssText = [
-            'position:fixed', 'top:0', 'left:0', 'width:100%', 'height:100%',
-            'z-index:2147483647', 'cursor:crosshair', 'pointer-events:all',
-        ].join(';');
+        // All picker UI elements carry data-picker-ui so handlers can skip them
         const highlight = document.createElement('div');
+        highlight.dataset.pickerUi = '1';
         highlight.style.cssText = [
             'position:fixed', 'pointer-events:none', 'z-index:2147483646',
             'outline:3px solid #f97316', 'background:rgba(249,115,22,0.08)',
-            'transition:all 0.08s', 'border-radius:3px',
+            'transition:top 0.06s,left 0.06s,width 0.06s,height 0.06s', 'border-radius:3px',
         ].join(';');
-        document.body.appendChild(highlight);
         const label = document.createElement('div');
+        label.dataset.pickerUi = '1';
         label.style.cssText = [
             'position:fixed', 'bottom:16px', 'left:50%', 'transform:translateX(-50%)',
             'background:#1e293b', 'color:#f8fafc', 'padding:8px 16px',
             'border-radius:6px', 'font:13px/1.4 monospace', 'z-index:2147483647',
             'pointer-events:none', 'white-space:nowrap',
         ].join(';');
-        label.textContent = 'Hover over a section and click to scope • Esc = full page';
-        document.body.appendChild(label);
+        label.textContent = 'Click to select section • Click [Pause] to open hover menus • Esc = full page';
+        const btn = document.createElement('button');
+        btn.dataset.pickerUi = '1';
+        btn.textContent = '⏸ Pause Picker';
+        btn.style.cssText = [
+            'position:fixed', 'top:16px', 'right:16px', 'z-index:2147483647',
+            'background:#1e293b', 'color:#f8fafc', 'padding:8px 16px',
+            'border-radius:6px', 'font:13px/1.4 monospace', 'border:2px solid #f97316', 'cursor:pointer',
+        ].join(';');
+        document.body.append(highlight, label, btn);
+        document.body.style.cursor = 'crosshair';
+        let paused = false;
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            e.preventDefault();
+            paused = !paused;
+            if (paused) {
+                highlight.style.display = 'none';
+                btn.textContent = '▶ Resume Picker';
+                btn.style.background = '#dc2626';
+                document.body.style.cursor = 'default';
+                label.textContent = 'Picker paused — hover to open menus, then click Resume';
+            }
+            else {
+                highlight.style.display = '';
+                btn.textContent = '⏸ Pause Picker';
+                btn.style.background = '#1e293b';
+                document.body.style.cursor = 'crosshair';
+                label.textContent = 'Click to select section • Click [Pause] to open hover menus • Esc = full page';
+            }
+        });
         function buildSelector(el) {
             const e = el;
             if (e.id && !/^\d|react-|ember/.test(e.id))
@@ -43,7 +69,6 @@ async function pickSection(page) {
             const ariaLabel = e.getAttribute('aria-label') ?? '';
             if (ariaLabel)
                 return `${e.tagName.toLowerCase()}[aria-label="${ariaLabel}"]`;
-            // Build structural path (max 3 levels)
             const parts = [];
             let cur = el;
             for (let depth = 0; depth < 3 && cur && cur !== document.body; depth++) {
@@ -57,9 +82,12 @@ async function pickSection(page) {
             return parts.join(' > ');
         }
         function getBlockAncestor(target) {
-            // Walk up to find a meaningful block container (not body/html)
             let el = target;
             while (el && el !== document.body) {
+                if (el.dataset?.pickerUi) {
+                    el = el.parentElement;
+                    continue;
+                }
                 const tag = el.tagName.toLowerCase();
                 const style = window.getComputedStyle(el);
                 const display = style.display;
@@ -71,44 +99,251 @@ async function pickSection(page) {
             }
             return document.body;
         }
-        overlay.addEventListener('mousemove', (e) => {
-            overlay.style.pointerEvents = 'none';
-            const target = document.elementFromPoint(e.clientX, e.clientY);
-            overlay.style.pointerEvents = 'all';
-            if (!target)
+        function cleanup() {
+            document.removeEventListener('mouseover', onOver);
+            document.removeEventListener('click', onClick, true);
+            document.removeEventListener('keydown', onKey, true);
+            document.body.style.cursor = '';
+            highlight.remove();
+            label.remove();
+            btn.remove();
+        }
+        function onOver(e) {
+            if (paused)
+                return;
+            const target = e.target;
+            if (!target || target.dataset?.pickerUi)
                 return;
             const section = getBlockAncestor(target);
+            if (section === document.body)
+                return;
             const r = section.getBoundingClientRect();
             highlight.style.top = `${r.top}px`;
             highlight.style.left = `${r.left}px`;
             highlight.style.width = `${r.width}px`;
             highlight.style.height = `${r.height}px`;
-            label.textContent = `<${section.tagName.toLowerCase()}${section.id ? '#' + section.id : ''}> • click to select • Esc = full page`;
-        });
-        overlay.addEventListener('click', (e) => {
-            overlay.style.pointerEvents = 'none';
-            const target = document.elementFromPoint(e.clientX, e.clientY);
-            overlay.style.pointerEvents = 'all';
-            cleanup();
-            if (!target) {
-                resolve(null);
-                return;
-            }
-            const section = getBlockAncestor(target);
-            resolve(section === document.body ? null : buildSelector(section));
-        });
-        document.addEventListener('keydown', (e) => {
-            if (e.key === 'Escape') {
-                cleanup();
-                resolve(null);
-            }
-        }, { once: true });
-        function cleanup() {
-            overlay.remove();
-            highlight.remove();
-            label.remove();
+            label.textContent = `<${section.tagName.toLowerCase()}${section.id ? '#' + section.id : ''}> — click to select`;
         }
-        document.body.appendChild(overlay);
+        function extractLocators(root) {
+            // Broad selector — includes ARIA roles, tabindex, onclick, custom interactive elements
+            const INTERACTIVE_SELECTORS = 'input, button, a[href], select, textarea, details, summary, ' +
+                '[role="button"], [role="link"], [role="textbox"], [role="checkbox"], ' +
+                '[role="combobox"], [role="tab"], [role="menuitem"], [role="menuitemcheckbox"], ' +
+                '[role="menuitemradio"], [role="option"], [role="switch"], [role="treeitem"], ' +
+                '[role="gridcell"], [role="row"], [tabindex]:not([tabindex="-1"]), [onclick]';
+            function isVisible(el) {
+                const r = el.getBoundingClientRect(), s = window.getComputedStyle(el);
+                return r.width > 0 && r.height > 0 &&
+                    parseFloat(s.opacity) > 0 &&
+                    s.visibility !== 'hidden' &&
+                    s.display !== 'none';
+            }
+            // Check if a portaled element is positioned near the section (dropdown proximity).
+            // Horizontally must share x-range with the section.
+            // Vertically must start within 2× the section's height above or below it.
+            function nearSection(el, sr) {
+                const r = el.getBoundingClientRect();
+                if (r.width <= 0 || r.height <= 0)
+                    return false;
+                const hBuffer = Math.max(sr.height * 2, 80);
+                const hOverlap = r.left < sr.right && r.right > sr.left;
+                const vNear = r.top < sr.bottom + hBuffer && r.bottom > sr.top - hBuffer;
+                return hOverlap && vNear;
+            }
+            function snake(str) {
+                return str.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 40) || 'element';
+            }
+            function isAutoId(id) {
+                return /^(react-|ember|__|\d|uid|comp|el-)/.test(id) || /\d{4,}/.test(id);
+            }
+            function esc(v) { return v.replace(/'/g, "\\'").replace(/"/g, '\\"'); }
+            function cssPath(el) {
+                const parts = [];
+                let cur = el;
+                while (cur && cur !== document.body) {
+                    const tag = cur.tagName.toLowerCase();
+                    const sibs = cur.parentElement ? Array.from(cur.parentElement.children).filter(c => c.tagName === cur.tagName) : [];
+                    parts.unshift(sibs.length > 1 ? `${tag}:nth-of-type(${sibs.indexOf(cur) + 1})` : tag);
+                    cur = cur.parentElement;
+                    if (parts.length >= 4)
+                        break;
+                }
+                return parts.join(' > ');
+            }
+            function xpathFor(el) {
+                const parts = [];
+                let cur = el;
+                while (cur && cur !== document.body) {
+                    const tag = cur.tagName.toLowerCase();
+                    const sibs = cur.parentElement ? Array.from(cur.parentElement.children).filter(c => c.tagName === cur.tagName) : [];
+                    parts.unshift(sibs.length > 1 ? `${tag}[${sibs.indexOf(cur) + 1}]` : tag);
+                    cur = cur.parentElement;
+                    if (parts.length >= 4)
+                        break;
+                }
+                return '//' + parts.join('/');
+            }
+            // Returns true if el has a positioned (absolute/fixed) ancestor outside of root —
+            // i.e. it lives in a portal/dropdown that floated out of the DOM subtree.
+            function isInFloatingContainer(el) {
+                let cur = el.parentElement;
+                while (cur && cur !== document.body) {
+                    if (root.contains(cur))
+                        return false; // re-entered root subtree, not a portal
+                    const s = window.getComputedStyle(cur);
+                    if ((s.position === 'fixed' || s.position === 'absolute') && parseInt(s.zIndex || '0') > 0)
+                        return true;
+                    cur = cur.parentElement;
+                }
+                return false;
+            }
+            const isFullPage = root === document.body;
+            const sectionRect = root.getBoundingClientRect();
+            const seen = new Set(), entries = [];
+            document.querySelectorAll(INTERACTIVE_SELECTORS).forEach(el => {
+                if (el.dataset?.pickerUi)
+                    return;
+                if (!isVisible(el))
+                    return;
+                if (!isFullPage) {
+                    const inRoot = root.contains(el);
+                    // Include if it's a DOM child, OR if it's in a floating portal near the section
+                    if (!inRoot && !(isInFloatingContainer(el) && nearSection(el, sectionRect)))
+                        return;
+                }
+                const tag = el.tagName.toLowerCase(), type = el.getAttribute('type') ?? '';
+                const testId = el.getAttribute('data-testid') ?? el.getAttribute('data-cy') ?? el.getAttribute('data-qa') ?? '';
+                const ariaLabel = el.getAttribute('aria-label') ?? '', id = el.getAttribute('id') ?? '';
+                const labelEl = id ? document.querySelector(`label[for="${id}"]`) : null;
+                const labelText = labelEl?.innerText?.trim() ?? '', innerText = el.innerText?.trim().slice(0, 60) ?? '';
+                const placeholder = el.getAttribute('placeholder') ?? '', name = el.getAttribute('name') ?? '';
+                const role = el.getAttribute('role') ?? '';
+                const cls = Array.from(el.classList).filter(c => !/\d{3,}/.test(c)).slice(0, 2).join('.');
+                let css = '', xpath = '', resilience = 0, fragile = false, humanName = '';
+                if (testId) {
+                    const a = el.getAttribute('data-testid') ? 'data-testid' : el.getAttribute('data-cy') ? 'data-cy' : 'data-qa';
+                    css = `[${a}="${esc(testId)}"]`;
+                    xpath = `//${tag}[@${a}="${esc(testId)}"]`;
+                    resilience = 95;
+                    humanName = snake(testId);
+                }
+                else if (ariaLabel) {
+                    css = `${tag}[aria-label="${esc(ariaLabel)}"]`;
+                    xpath = `//${tag}[@aria-label="${esc(ariaLabel)}"]`;
+                    resilience = 90;
+                    humanName = snake(ariaLabel);
+                }
+                else if (id && !isAutoId(id)) {
+                    css = `#${CSS.escape(id)}`;
+                    xpath = `//${tag}[@id="${esc(id)}"]`;
+                    resilience = 85;
+                    humanName = snake(id);
+                }
+                else if (labelText) {
+                    css = id ? `#${CSS.escape(id)}` : `${tag}[name="${esc(name || id)}"]`;
+                    xpath = `//label[normalize-space()="${esc(labelText)}"]/following-sibling::${tag}[1]`;
+                    resilience = 80;
+                    humanName = snake(labelText) + (tag === 'input' ? '_input' : '');
+                }
+                else if (name) {
+                    css = `${tag}[name="${esc(name)}"]`;
+                    xpath = `//${tag}[@name="${esc(name)}"]`;
+                    resilience = 75;
+                    humanName = snake(name);
+                }
+                else if (placeholder) {
+                    css = `${tag}[placeholder="${esc(placeholder)}"]`;
+                    xpath = `//${tag}[@placeholder="${esc(placeholder)}"]`;
+                    resilience = 70;
+                    humanName = snake(placeholder) + '_input';
+                }
+                else if (role && role !== 'none' && role !== 'presentation' && innerText) {
+                    css = cssPath(el);
+                    xpath = `//*[@role="${role}" and normalize-space()="${esc(innerText)}"]`;
+                    resilience = 65;
+                    humanName = snake(innerText + '_' + role);
+                }
+                else if (role && role !== 'none' && role !== 'presentation') {
+                    css = cssPath(el);
+                    xpath = `//*[@role="${role}"]`;
+                    resilience = 60;
+                    humanName = snake(role) + '_el';
+                }
+                else if (type && (tag === 'input' || tag === 'button')) {
+                    css = `${tag}[type="${type}"]`;
+                    xpath = `//${tag}[@type="${type}"]`;
+                    resilience = 60;
+                    humanName = snake(type + '_' + tag);
+                }
+                // Use structural CSS path (unique per element) + text XPath for links and buttons with text
+                else if (tag === 'button' && innerText) {
+                    css = cssPath(el);
+                    xpath = `//button[normalize-space()="${esc(innerText)}"]`;
+                    resilience = 60;
+                    humanName = snake(innerText) + '_button';
+                }
+                else if (tag === 'a' && innerText) {
+                    css = cssPath(el);
+                    xpath = `//a[normalize-space()="${esc(innerText)}"]`;
+                    resilience = 60;
+                    humanName = snake(innerText) + '_link';
+                }
+                else if (cls) {
+                    css = `${tag}.${cls}`;
+                    xpath = `//${tag}[contains(@class,"${cls.split('.')[0]}")]`;
+                    resilience = 40;
+                    fragile = true;
+                    humanName = snake(cls.split('.')[0] || tag);
+                }
+                else {
+                    css = cssPath(el);
+                    xpath = xpathFor(el);
+                    resilience = 20;
+                    fragile = true;
+                    humanName = snake(innerText || tag) + '_el';
+                }
+                if (!css || seen.has(css))
+                    return;
+                seen.add(css);
+                entries.push({ name: humanName, css, xpath, resilience, fragile });
+            });
+            return entries.sort((a, b) => b.resilience - a.resilience);
+        }
+        function onClick(e) {
+            if (paused)
+                return;
+            const target = e.target;
+            if (target?.dataset?.pickerUi)
+                return;
+            e.preventDefault();
+            e.stopPropagation();
+            const section = getBlockAncestor(target ?? document.body);
+            const selector = section === document.body ? null : buildSelector(section);
+            // Extract locators NOW while the DOM is still in its current state (dropdown open)
+            const entries = extractLocators(section === document.body ? document.body : section);
+            cleanup();
+            resolve({ selector, entries });
+        }
+        function onKey(e) {
+            if (e.key === 'Escape') {
+                if (paused) {
+                    // Resume picker
+                    paused = false;
+                    highlight.style.display = '';
+                    btn.textContent = '⏸ Pause Picker';
+                    btn.style.background = '#1e293b';
+                    document.body.style.cursor = 'crosshair';
+                    label.textContent = 'Click to select section • Click [Pause] to open hover menus • Esc = full page';
+                }
+                else {
+                    cleanup();
+                    resolve({ selector: null, entries: extractLocators(document.body) });
+                }
+            }
+        }
+        document.addEventListener('mouseover', onOver);
+        document.addEventListener('click', onClick, true);
+        document.addEventListener('keydown', onKey, true);
     }));
 }
 async function generateLocators(page, sectionSelector) {
@@ -237,16 +472,14 @@ async function generateLocators(page, sectionSelector) {
                 humanName = toSnakeCase(type + '_' + tag);
             }
             else if (tag === 'button' && innerText) {
-                const t = escAttr(innerText);
-                css = `button`;
-                xpath = `//button[normalize-space()="${t}"]`;
+                css = buildCssPath(el);
+                xpath = `//button[normalize-space()="${escAttr(innerText)}"]`;
                 resilience = 60;
                 humanName = toSnakeCase(innerText) + '_button';
             }
             else if (tag === 'a' && innerText) {
-                const t = escAttr(innerText);
-                css = `a`;
-                xpath = `//a[normalize-space()="${t}"]`;
+                css = buildCssPath(el);
+                xpath = `//a[normalize-space()="${escAttr(innerText)}"]`;
                 resilience = 60;
                 humanName = toSnakeCase(innerText) + '_link';
             }
@@ -305,10 +538,14 @@ async function runCli() {
         sectionSelector = explicitSelector;
     }
     else if (wantsSection) {
-        const picked = await pickSection(page);
-        sectionSelector = picked ?? undefined;
+        const { selector, entries: pickedEntries } = await pickSection(page);
+        sectionSelector = selector ?? undefined;
         if (!sectionSelector)
             console.log('  No section selected — using full page.\n');
+        const sorted = pickedEntries.sort((a, b) => b.resilience - a.resilience);
+        console.log(formatLocators(sorted, page.url(), await page.title(), sectionSelector));
+        await browser.close();
+        return;
     }
     const entries = await generateLocators(page, sectionSelector);
     console.log(formatLocators(entries, page.url(), await page.title(), sectionSelector));

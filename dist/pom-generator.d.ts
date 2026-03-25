@@ -26,7 +26,10 @@ export interface LocatorEntry {
  * Injects an interactive overlay that lets the user click on a section of the page.
  * Returns a unique CSS selector for the clicked element.
  */
-export declare function pickSection(page: Page): Promise<string | null>;
+export declare function pickSection(page: Page): Promise<{
+    selector: string | null;
+    entries: LocatorEntry[];
+}>;
 export declare function generateLocators(page: Page, sectionSelector?: string): Promise<LocatorEntry[]>;
 export declare function formatLocators(entries: LocatorEntry[], url: string, title: string, sectionSelector?: string): string;
 export declare function runCli(): Promise<void>;
