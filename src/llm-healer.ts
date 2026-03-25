@@ -149,8 +149,8 @@ async function healWithGitHubModels(prompt: string): Promise<HealResult | null> 
         try {
           const parsed = JSON.parse(data);
           const text: string = parsed.choices?.[0]?.message?.content?.trim() ?? '';
-          const json = text.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '');
-          const result = JSON.parse(json);
+          const start = text.indexOf('{'), end = text.lastIndexOf('}');
+          const result = JSON.parse(start !== -1 && end > start ? text.slice(start, end + 1) : text);
           if (typeof result.css === 'string' && typeof result.xpath === 'string') {
             resolve(result as HealResult);
           } else {

@@ -192,9 +192,13 @@ function buildPrompt(domContext, url, sectionSelector) {
         `"reasoning":"brief explanation"}`);
 }
 function parseLocators(text) {
+    // Find the outermost JSON object in the response (handles prose + JSON, code fences, etc.)
+    const start = text.indexOf('{');
+    const end = text.lastIndexOf('}');
+    if (start === -1 || end === -1 || end <= start)
+        return null;
     try {
-        const json = text.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '').trim();
-        const parsed = JSON.parse(json);
+        const parsed = JSON.parse(text.slice(start, end + 1));
         if (Array.isArray(parsed.locators))
             return { locators: parsed.locators, reasoning: parsed.reasoning ?? '' };
     }
