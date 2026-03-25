@@ -231,35 +231,6 @@ function suggestWithClaudeCli(prompt) {
     }
     return normalise(raw);
 }
-/** Anthropic API — sends screenshot as vision input */
-async function suggestWithAnthropicApi(prompt, screenshotB64) {
-    if (!process.env.ANTHROPIC_API_KEY) {
-        console.warn('  [Anthropic API] skipped — ANTHROPIC_API_KEY not set');
-        return null;
-    }
-    try {
-        const Anthropic = require('@anthropic-ai/sdk');
-        const client = new Anthropic.default();
-        const response = await client.messages.create({
-            model: 'claude-sonnet-4-6',
-            max_tokens: 1024,
-            messages: [{
-                    role: 'user',
-                    content: [
-                        { type: 'image', source: { type: 'base64', media_type: 'image/png', data: screenshotB64 } },
-                        { type: 'text', text: prompt },
-                    ],
-                }],
-        });
-        const text = response.content.find((b) => b.type === 'text')?.text?.trim() ?? '';
-        const raw = parseLocators(text);
-        return raw ? normalise(raw) : null;
-    }
-    catch (e) {
-        console.warn(`  [Anthropic API] error: ${e.message}`);
-        return null;
-    }
-}
 /** GitHub Models API — text-only */
 async function suggestWithGitHubModels(prompt) {
     const tokenResult = (0, child_process_1.spawnSync)('gh', ['auth', 'token'], { encoding: 'utf8', timeout: 5_000 });
@@ -322,21 +293,18 @@ async function suggestWithGitHubModels(prompt) {
 // ---------------------------------------------------------------------------
 async function suggestLocatorsWithLLM(page, screenshotDir, sectionSelector) {
     console.log('  🤖 Asking LLM to suggest locators...');
-    const { screenshotPath: _sp, screenshotB64, domContext } = await captureContext(page, screenshotDir, sectionSelector);
+    const { domContext } = await captureContext(page, screenshotDir, sectionSelector);
     const prompt = buildPrompt(domContext, page.url(), sectionSelector);
     const config = (0, config_1.loadConfig)();
     const assistant = config?.assistant ?? 'both';
     const strategies = assistant === 'copilot'
-        ? [
-            { name: 'GitHub Models', fn: () => suggestWithGitHubModels(prompt) },
-            { name: 'Anthropic API', fn: () => suggestWithAnthropicApi(prompt, screenshotB64) },
-            { name: 'Claude CLI', fn: async () => suggestWithClaudeCli(prompt) },
-        ]
-        : [
-            { name: 'Claude CLI', fn: async () => suggestWithClaudeCli(prompt) },
-            { name: 'Anthropic API', fn: () => suggestWithAnthropicApi(prompt, screenshotB64) },
-            { name: 'GitHub Models', fn: () => suggestWithGitHubModels(prompt) },
-        ];
+        ? [{ name: 'GitHub Models', fn: () => suggestWithGitHubModels(prompt) }]
+        : assistant === 'claude'
+            ? [{ name: 'Claude CLI', fn: async () => suggestWithClaudeCli(prompt) }]
+            : [
+                { name: 'Claude CLI', fn: async () => suggestWithClaudeCli(prompt) },
+                { name: 'GitHub Models', fn: () => suggestWithGitHubModels(prompt) },
+            ];
     for (const { name, fn } of strategies) {
         const result = await fn();
         if (result && result.entries.length > 0) {

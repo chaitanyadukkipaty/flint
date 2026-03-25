@@ -162,37 +162,13 @@ async function healWithGitHubModels(prompt) {
         req.end();
     });
 }
-/** Strategy 3: Anthropic API (requires ANTHROPIC_API_KEY) */
-async function healWithAnthropicApi(prompt) {
-    if (!process.env.ANTHROPIC_API_KEY)
-        return null;
-    try {
-        const Anthropic = require('@anthropic-ai/sdk');
-        const client = new Anthropic.default();
-        const response = await client.messages.create({
-            model: 'claude-sonnet-4-6',
-            max_tokens: 256,
-            messages: [{
-                    role: 'user',
-                    content: `${prompt}\n\nRespond with ONLY a JSON object: {"css":"...","xpath":"...","reasoning":"..."}`,
-                }],
-        });
-        const text = response.content[0].text.trim();
-        const json = text.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '');
-        const parsed = JSON.parse(json);
-        if (typeof parsed.css === 'string' && typeof parsed.xpath === 'string')
-            return parsed;
-    }
-    catch { }
-    return null;
-}
 /**
  * Ask an LLM for an alternative locator when a step fails.
  *
- * Strategy order is determined by .flint.json (set via `flint init`):
- *   claude  → Claude CLI first,   then GitHub Models, then Anthropic API
- *   copilot → GitHub Models first, then Anthropic API, then Claude CLI
- *   both    → Claude CLI first,   then GitHub Models, then Anthropic API
+ * Strategy is determined by .flint.json (set via `flint init`):
+ *   claude  → Claude CLI only
+ *   copilot → GitHub Models only
+ *   both    → Claude CLI, then GitHub Models
  *   (none)  → same as both
  */
 async function healStep(page, step, error) {
@@ -212,18 +188,14 @@ async function healStep(page, step, error) {
     const prompt = buildPrompt(step, error, page.url(), elements);
     const config = (0, config_1.loadConfig)();
     const assistant = config?.assistant ?? 'both';
-    // Define strategy lists per preference
     const strategies = assistant === 'copilot'
-        ? [
-            { name: 'GitHub Models (gh auth token)', fn: () => healWithGitHubModels(prompt) },
-            { name: 'Anthropic API (ANTHROPIC_API_KEY)', fn: () => healWithAnthropicApi(prompt) },
-            { name: 'Claude Code CLI', fn: async () => healWithClaudeCli(prompt) },
-        ]
-        : [
-            { name: 'Claude Code CLI', fn: async () => healWithClaudeCli(prompt) },
-            { name: 'GitHub Models (gh auth token)', fn: () => healWithGitHubModels(prompt) },
-            { name: 'Anthropic API (ANTHROPIC_API_KEY)', fn: () => healWithAnthropicApi(prompt) },
-        ];
+        ? [{ name: 'GitHub Models', fn: () => healWithGitHubModels(prompt) }]
+        : assistant === 'claude'
+            ? [{ name: 'Claude Code CLI', fn: async () => healWithClaudeCli(prompt) }]
+            : [
+                { name: 'Claude Code CLI', fn: async () => healWithClaudeCli(prompt) },
+                { name: 'GitHub Models', fn: () => healWithGitHubModels(prompt) },
+            ];
     for (const { name, fn } of strategies) {
         const result = await fn();
         if (result) {
@@ -231,9 +203,9 @@ async function healStep(page, step, error) {
             return result;
         }
     }
-    console.warn('  ⚠ All healing strategies failed. To enable healing:');
-    console.warn('    - Claude Code: install and authenticate the claude CLI');
-    console.warn('    - VS Code Copilot: run `gh auth login`');
-    console.warn('    - Any env: set ANTHROPIC_API_KEY');
+    const hint = assistant === 'copilot' ? 'run `gh auth login`'
+        : assistant === 'claude' ? 'install and authenticate the claude CLI'
+            : 'install claude CLI or run `gh auth login`';
+    console.warn(`  ⚠ LLM healing failed. To enable: ${hint}`);
     return null;
 }
