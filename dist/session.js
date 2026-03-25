@@ -158,8 +158,21 @@ async function main() {
     page = context.pages()[0] ?? await context.newPage();
     // 3. Initialize recorder
     const recorder = new flow_recorder_1.FlowRecorder(flowPath, flowName);
-    // 4. Attach manual capture
-    const cleanup = await (0, manual_capture_1.attachManualCapture)(page, recorder, SCREENSHOT_DIR, useLLM);
+    // 4. Attach manual capture to the initial page
+    const cleanupFns = [];
+    cleanupFns.push(await (0, manual_capture_1.attachManualCapture)(page, recorder, SCREENSHOT_DIR, useLLM));
+    // Track the most recently active page so l/sl commands operate on the live tab.
+    // Also attach capture to any new tabs the user opens.
+    const trackPage = (p) => {
+        page = p;
+        (0, manual_capture_1.attachManualCapture)(p, recorder, SCREENSHOT_DIR, useLLM).then(fn => cleanupFns.push(fn));
+        p.on('close', () => {
+            const pages = context.pages().filter(pg => !pg.isClosed());
+            if (pages.length > 0)
+                page = pages[pages.length - 1];
+        });
+    };
+    context.on('page', trackPage);
     // 5. Fetch the WS debugger URL and auto-update .mcp.json
     // Chrome needs a moment to expose the CDP HTTP endpoint after launch
     await new Promise(r => setTimeout(r, 500));
@@ -239,7 +252,7 @@ async function main() {
     });
     const shutdown = async () => {
         console.log('\nShutting down...');
-        await cleanup();
+        await Promise.all(cleanupFns.map(fn => Promise.resolve(fn())));
         restoreMcpJson();
         await context.close();
         console.log(`Flow saved: ${flowPath} (${recorder.getStepCount()} steps)`);
