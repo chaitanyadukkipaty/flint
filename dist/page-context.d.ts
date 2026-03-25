@@ -5,10 +5,13 @@
  */
 import { Page } from 'playwright';
 export interface PageElement {
+    index: number;
     role: string;
     name: string;
+    tag: string;
+    type?: string;
+    testId?: string;
     locator: string;
-    tag?: string;
 }
 export interface PageContext {
     url: string;
@@ -16,6 +19,7 @@ export interface PageContext {
     screenshotPath: string;
     elements: PageElement[];
     contentSummary: string;
+    scrollInfo: string;
     formatted: string;
 }
 export declare function buildPageContext(page: Page, screenshotPath: string): Promise<PageContext>;

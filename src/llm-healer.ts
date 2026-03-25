@@ -24,31 +24,56 @@ const HEAL_SCHEMA = JSON.stringify({
 
 async function extractPageElements(page: Page): Promise<string> {
   return page.evaluate(() => {
-    const sel = 'a,button,input,select,textarea,[role="button"],[role="link"],[role="checkbox"],[role="tab"],[onclick]';
-    return Array.from(document.querySelectorAll(sel))
-      .slice(0, 80)
-      .map(el => {
-        const e = el as HTMLElement;
-        const tag = e.tagName.toLowerCase();
-        const parts: string[] = [`<${tag}`];
-        if (e.id)                                       parts.push(` id="${e.id}"`);
-        const tid = e.getAttribute('data-testid') ?? e.getAttribute('data-cy') ?? '';
-        if (tid)                                        parts.push(` data-testid="${tid}"`);
-        const al = e.getAttribute('aria-label') ?? '';
-        if (al)                                         parts.push(` aria-label="${al}"`);
-        const nm = e.getAttribute('name') ?? '';
-        if (nm)                                         parts.push(` name="${nm}"`);
-        const ph = (e as HTMLInputElement).placeholder ?? '';
-        if (ph)                                         parts.push(` placeholder="${ph}"`);
-        const tp = e.getAttribute('type') ?? '';
-        if (tp)                                         parts.push(` type="${tp}"`);
-        const cls = e.className?.trim().split(/\s+/).slice(0, 2).join(' ');
-        if (cls)                                        parts.push(` class="${cls}"`);
-        const txt = e.innerText?.trim().slice(0, 60);
-        parts.push(txt ? `>${txt}` : '>');
-        return parts.join('');
-      })
-      .join('\n');
+    // Broad selector matching browser-use's interactive element detection
+    const sel = [
+      'a[href]', 'button', 'input', 'select', 'textarea',
+      '[role="button"]', '[role="link"]', '[role="checkbox"]', '[role="radio"]',
+      '[role="tab"]', '[role="menuitem"]', '[role="combobox"]', '[role="option"]',
+      '[role="switch"]', '[tabindex]:not([tabindex="-1"])', '[onclick]',
+    ].join(',');
+
+    const viewportH = window.innerHeight;
+    const lines: string[] = [];
+    let idx = 0;
+
+    document.querySelectorAll<HTMLElement>(sel).forEach(el => {
+      // Multi-layer visibility check (browser-use approach)
+      const style = window.getComputedStyle(el);
+      if (style.display === 'none' || style.visibility === 'hidden') return;
+      if (parseFloat(style.opacity) <= 0) return;
+
+      const r = el.getBoundingClientRect();
+      if (r.width <= 0 || r.height <= 0) return;
+      // Include elements up to 2 viewports below current scroll (browser-use viewport_threshold)
+      if (r.bottom < 0 || r.top > viewportH * 2) return;
+
+      const tag = el.tagName.toLowerCase();
+      const parts: string[] = [`[i_${idx++}] <${tag}`];
+
+      if (el.id)                                         parts.push(` id="${el.id}"`);
+      const tid = el.getAttribute('data-testid') ?? el.getAttribute('data-cy') ?? el.getAttribute('data-test') ?? '';
+      if (tid)                                           parts.push(` data-testid="${tid}"`);
+      const role = el.getAttribute('role') ?? '';
+      if (role)                                          parts.push(` role="${role}"`);
+      const al = el.getAttribute('aria-label') ?? '';
+      if (al)                                            parts.push(` aria-label="${al}"`);
+      const nm = el.getAttribute('name') ?? '';
+      if (nm)                                            parts.push(` name="${nm}"`);
+      const ph = (el as HTMLInputElement).placeholder ?? '';
+      if (ph)                                            parts.push(` placeholder="${ph}"`);
+      const tp = el.getAttribute('type') ?? '';
+      if (tp)                                            parts.push(` type="${tp}"`);
+      const expanded = el.getAttribute('aria-expanded') ?? '';
+      if (expanded)                                      parts.push(` aria-expanded="${expanded}"`);
+      const checked = el.getAttribute('aria-checked') ?? '';
+      if (checked)                                       parts.push(` aria-checked="${checked}"`);
+
+      const txt = el.innerText?.trim().slice(0, 80);
+      parts.push(txt ? `>${txt}` : '>');
+      lines.push(parts.join(''));
+    });
+
+    return lines.slice(0, 80).join('\n');
   });
 }
 
