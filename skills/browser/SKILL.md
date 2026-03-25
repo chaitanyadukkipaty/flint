@@ -109,16 +109,41 @@ If the user asks **"get locators for a section"**, **"pick a section"**, **"loca
 ```javascript
 async (page) => {
   return await page.evaluate(() => new Promise(resolve => {
-    const overlay = document.createElement('div');
-    overlay.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;z-index:2147483647;cursor:crosshair;pointer-events:all;';
+    // All picker UI elements use data-picker-ui so handlers can skip them
     const hl = document.createElement('div');
-    hl.style.cssText = 'position:fixed;pointer-events:none;z-index:2147483646;outline:3px solid #f97316;background:rgba(249,115,22,0.08);border-radius:3px;transition:all 0.08s;';
+    hl.dataset.pickerUi = '1';
+    hl.style.cssText = 'position:fixed;pointer-events:none;z-index:2147483646;outline:3px solid #f97316;background:rgba(249,115,22,0.08);border-radius:3px;transition:top 0.06s,left 0.06s,width 0.06s,height 0.06s;';
     const lbl = document.createElement('div');
+    lbl.dataset.pickerUi = '1';
     lbl.style.cssText = 'position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:#1e293b;color:#f8fafc;padding:8px 16px;border-radius:6px;font:13px/1.4 monospace;z-index:2147483647;pointer-events:none;white-space:nowrap;';
-    lbl.textContent = 'Click a section to scope locators • Esc = full page';
-    document.body.append(hl, lbl, overlay);
+    lbl.textContent = 'Click to select section • Click [Pause] to open hover menus • Esc = full page';
+    const btn = document.createElement('button');
+    btn.dataset.pickerUi = '1';
+    btn.textContent = '⏸ Pause Picker';
+    btn.style.cssText = 'position:fixed;top:16px;right:16px;z-index:2147483647;background:#1e293b;color:#f8fafc;padding:8px 16px;border-radius:6px;font:13px/1.4 monospace;border:2px solid #f97316;cursor:pointer;';
+    document.body.append(hl, lbl, btn);
+    document.body.style.cursor = 'crosshair';
+    let paused = false;
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation(); e.preventDefault();
+      paused = !paused;
+      if (paused) {
+        hl.style.display = 'none';
+        btn.textContent = '▶ Resume Picker';
+        btn.style.background = '#dc2626';
+        document.body.style.cursor = 'default';
+        lbl.textContent = 'Picker paused — hover to open menus, then click Resume';
+      } else {
+        hl.style.display = '';
+        btn.textContent = '⏸ Pause Picker';
+        btn.style.background = '#1e293b';
+        document.body.style.cursor = 'crosshair';
+        lbl.textContent = 'Click to select section • Click [Pause] to open hover menus • Esc = full page';
+      }
+    });
     function blockAncestor(el) {
       while (el && el !== document.body) {
+        if (el.dataset && el.dataset.pickerUi) { el = el.parentElement; continue; }
         const s = window.getComputedStyle(el), r = el.getBoundingClientRect();
         if ((s.display==='block'||s.display==='flex'||s.display==='grid')&&r.width>60&&r.height>30) return el;
         el = el.parentElement;
@@ -140,26 +165,53 @@ async (page) => {
       }
       return parts.join(' > ');
     }
-    overlay.addEventListener('mousemove', e => {
-      overlay.style.pointerEvents='none';
-      const t=document.elementFromPoint(e.clientX,e.clientY);
-      overlay.style.pointerEvents='all';
-      if(!t) return;
-      const sec=blockAncestor(t), r=sec.getBoundingClientRect();
+    function cleanup() {
+      document.removeEventListener('mouseover', onOver);
+      document.removeEventListener('click', onClick, true);
+      document.removeEventListener('keydown', onKey, true);
+      document.body.style.cursor = '';
+      [hl, lbl, btn].forEach(n => n.remove());
+    }
+    function onOver(e) {
+      if (paused) return;
+      const t = e.target;
+      if (!t || (t.dataset && t.dataset.pickerUi)) return;
+      const sec = blockAncestor(t);
+      if (sec === document.body) return;
+      const r = sec.getBoundingClientRect();
       Object.assign(hl.style,{top:r.top+'px',left:r.left+'px',width:r.width+'px',height:r.height+'px'});
-      lbl.textContent=`<${sec.tagName.toLowerCase()}${sec.id?'#'+sec.id:''}> — click to select • Esc = full page`;
-    });
-    overlay.addEventListener('click', e => {
-      overlay.style.pointerEvents='none';
-      const t=document.elementFromPoint(e.clientX,e.clientY);
-      [overlay,hl,lbl].forEach(n=>n.remove());
-      resolve(t&&blockAncestor(t)!==document.body ? buildSel(blockAncestor(t)) : null);
-    });
-    document.addEventListener('keydown', e => { if(e.key==='Escape'){[overlay,hl,lbl].forEach(n=>n.remove());resolve(null);} }, {once:true});
+      lbl.textContent=`<${sec.tagName.toLowerCase()}${sec.id?'#'+sec.id:''}> — click to select`;
+    }
+    function onClick(e) {
+      if (paused) return; // let all clicks pass through while paused
+      const t = e.target;
+      if (t && t.dataset && t.dataset.pickerUi) return;
+      e.preventDefault(); e.stopPropagation();
+      cleanup();
+      const sec = blockAncestor(t || document.body);
+      resolve(sec !== document.body ? buildSel(sec) : null);
+    }
+    function onKey(e) {
+      if (e.key === 'Escape') {
+        if (paused) {
+          paused = false;
+          hl.style.display = '';
+          btn.textContent = '⏸ Pause Picker';
+          btn.style.background = '#1e293b';
+          document.body.style.cursor = 'crosshair';
+          lbl.textContent = 'Click to select section • Click [Pause] to open hover menus • Esc = full page';
+        } else {
+          cleanup(); resolve(null);
+        }
+      }
+    }
+    document.addEventListener('mouseover', onOver);
+    document.addEventListener('click', onClick, true);
+    document.addEventListener('keydown', onKey, true);
   }));
 }
 ```
-Tell the user: **"The section picker is active in the browser — hover to highlight sections and click one to select it. Press Escape to use the full page."**
+Tell the user: **"The section picker is active — hover to highlight sections and click to select. Use the [Pause Picker] button (top-right) to open hover menus first, then click Resume and select. Press Escape for full page."**
 
 Wait for the user to make their selection. The function returns the section CSS selector (or `null` for full page).
 

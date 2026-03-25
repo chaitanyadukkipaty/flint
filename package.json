@@ -25,7 +25,9 @@
   "scripts": {
     "build": "tsc",
     "prepublishOnly": "npm run build",
+    "init": "ts-node src/cli.ts init",
     "session": "ts-node src/session.ts",
+    "session:llm": "FLINT_LLM=1 ts-node src/session.ts",
     "replay": "ts-node src/flow-player.ts",
     "pom": "ts-node src/pom-generator.ts"
   },

@@ -18,9 +18,9 @@ import * as http from 'http';
 import { FlowRecorder } from './flow-recorder';
 import { attachManualCapture } from './manual-capture';
 import { generateLocators, formatLocators, pickSection } from './pom-generator';
+import { suggestLocatorsWithLLM } from './llm-locator';
 
 const FLOW_DIR = path.join(process.cwd(), 'flows');
-const SCREENSHOT_DIR = path.join(FLOW_DIR, 'screenshots');
 const MCP_JSON = path.join(process.cwd(), '.mcp.json');
 const VSCODE_MCP_JSON = path.join(process.cwd(), '.vscode', 'mcp.json');
 
@@ -90,13 +90,16 @@ function getFreePort(): Promise<number> {
 }
 
 async function main() {
+  const useLLM = process.env.FLINT_LLM === '1' || process.env.FLINT_LLM === 'true';
+  const flowName = process.argv[2] ?? `flow-${Date.now()}`;
+  const flowSlug = flowName.replace(/\s+/g, '-');
+  const flowPath = path.join(FLOW_DIR, `${flowSlug}.yaml`);
+  const SCREENSHOT_DIR = path.join(FLOW_DIR, 'screenshots', flowSlug);
   fs.mkdirSync(SCREENSHOT_DIR, { recursive: true });
 
-  const flowName = process.argv[2] ?? `flow-${Date.now()}`;
-  const flowPath = path.join(FLOW_DIR, `${flowName.replace(/\s+/g, '-')}.yaml`);
-
   console.log(`\n🌐 Starting browser session: ${flowName}`);
-  console.log(`📄 Recording to: ${flowPath}\n`);
+  console.log(`📄 Recording to: ${flowPath}`);
+  console.log(`🤖 LLM locator suggestions: ${useLLM ? 'ON  (use l / sl to trigger)' : 'OFF (pass --llm to enable)'}\n`);
 
   // 1. Get a free port for Chrome's remote debugging (real CDP)
   const cdpPort = await getFreePort();
@@ -107,6 +110,12 @@ async function main() {
   //    Falls back to bundled Chromium if Chrome is not installed.
   const profileDir = path.join(os.homedir(), '.flint', 'chrome-profile');
   fs.mkdirSync(profileDir, { recursive: true });
+
+  // Remove stale SingletonLock so a new session can start even if a previous one crashed
+  const lockFile = path.join(profileDir, 'SingletonLock');
+  if (fs.existsSync(lockFile)) {
+    try { fs.unlinkSync(lockFile); } catch {}
+  }
 
   const launchOpts = {
     channel: 'chrome' as const,
@@ -133,7 +142,7 @@ async function main() {
   const recorder = new FlowRecorder(flowPath, flowName);
 
   // 4. Attach manual capture
-  const cleanup = await attachManualCapture(page, recorder, SCREENSHOT_DIR);
+  const cleanup = await attachManualCapture(page, recorder, SCREENSHOT_DIR, useLLM);
 
   // 5. Fetch the WS debugger URL and auto-update .mcp.json
   // Chrome needs a moment to expose the CDP HTTP endpoint after launch
@@ -152,6 +161,7 @@ async function main() {
   console.log('  section   (sl)  → pick a section visually, then show scoped locators');
   console.log('  save      (s)   → confirm flow is saved');
   console.log('  quit      (q)   → end session + restore .mcp.json');
+  if (useLLM) console.log('  [LLM mode]      → locators will be filtered by LLM after capture');
   console.log('');
 
   // 6. REPL
@@ -162,18 +172,33 @@ async function main() {
     const cmd = input.trim().toLowerCase();
     if (cmd === 'locators' || cmd === 'l') {
       try {
-        const entries = await generateLocators(page);
-        console.log('\n' + formatLocators(entries, page.url(), await page.title()) + '\n');
+        if (useLLM) {
+          const { entries, reasoning } = await suggestLocatorsWithLLM(page, SCREENSHOT_DIR);
+          if (reasoning) console.log(`  Reasoning: ${reasoning}`);
+          console.log('\n' + formatLocators(entries, page.url(), await page.title()) + '\n');
+        } else {
+          const entries = await generateLocators(page);
+          console.log('\n' + formatLocators(entries, page.url(), await page.title()) + '\n');
+        }
       } catch (e: any) {
         console.error('Could not get locators:', e.message);
       }
     } else if (cmd === 'section' || cmd === 'sl') {
       try {
-        const selector = await pickSection(page);
-        const sectionDesc = selector ?? 'full page';
-        if (!selector) console.log('  No section selected — using full page.\n');
-        const entries = await generateLocators(page, selector ?? undefined);
-        console.log('\n' + formatLocators(entries, page.url(), await page.title(), selector ?? undefined) + '\n');
+        if (useLLM) {
+          // Section picker still lets user visually select the area,
+          // but LLM generates the locators from SS + DOM context of that section
+          const { selector } = await pickSection(page);
+          if (!selector) console.log('  No section selected — using full page.\n');
+          const { entries, reasoning } = await suggestLocatorsWithLLM(page, SCREENSHOT_DIR, selector ?? undefined);
+          if (reasoning) console.log(`  Reasoning: ${reasoning}`);
+          console.log('\n' + formatLocators(entries, page.url(), await page.title(), selector ?? undefined) + '\n');
+        } else {
+          const { selector, entries: raw } = await pickSection(page);
+          if (!selector) console.log('  No section selected — using full page.\n');
+          const entries = raw.sort((a: any, b: any) => b.resilience - a.resilience);
+          console.log('\n' + formatLocators(entries, page.url(), await page.title(), selector ?? undefined) + '\n');
+        }
       } catch (e: any) {
         console.error('Could not get section locators:', e.message);
       }
