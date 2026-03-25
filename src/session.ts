@@ -81,7 +81,9 @@ function getCdpWsUrl(cdpPort: number): Promise<string> {
 /** Resolve a CDP URL (http endpoint or ws URL) to a WebSocket debugger URL */
 function resolveWsUrl(cdpUrl: string): Promise<string> {
   if (cdpUrl.startsWith('ws')) return Promise.resolve(cdpUrl);
-  const base = cdpUrl.replace(/\/$/, '');
+  // Replace localhost with 127.0.0.1 — Node 17+ resolves localhost to ::1 (IPv6)
+  // but Chrome's CDP port binds to 127.0.0.1 (IPv4) only.
+  const base = cdpUrl.replace(/\/$/, '').replace(/localhost/g, '127.0.0.1');
   return new Promise((resolve, reject) => {
     http.get(`${base}/json/version`, res => {
       let data = '';
