@@ -507,10 +507,40 @@ async function generateLocators(page, sectionSelector) {
     }, sectionSelector);
     return raw.sort((a, b) => b.resilience - a.resilience);
 }
+/** Convert a simple structural CSS selector to an XPath expression */
+function cssToXPath(css) {
+    const parts = css.split(/\s*>\s*/);
+    const xparts = parts.map(part => {
+        const nth = part.match(/^(\w+):nth-of-type\((\d+)\)$/);
+        if (nth)
+            return `${nth[1]}[${nth[2]}]`;
+        if (part.startsWith('#'))
+            return `*[@id="${part.slice(1)}"]`;
+        const attrM = part.match(/^\[([^\]]+)\]$/);
+        if (attrM)
+            return `*[@${attrM[1]}]`;
+        return part;
+    });
+    return '//' + xparts.join('/');
+}
 function formatLocators(entries, url, title, sectionSelector) {
     const scope = sectionSelector ? ` (section: ${sectionSelector})` : '';
     const header = `Page: ${title} | ${url}${scope}\n`;
-    const lines = entries.map(e => {
+    // Prepend the section container itself as a locator entry
+    const isFragile = sectionSelector ? /nth-of-type|:nth-child/.test(sectionSelector) : false;
+    const all = sectionSelector
+        ? [
+            {
+                name: (sectionSelector.replace(/[^a-z0-9]+/gi, '_').replace(/^_+|_+$/g, '').toLowerCase().slice(0, 40) || 'section') + '_section',
+                css: sectionSelector,
+                xpath: cssToXPath(sectionSelector),
+                resilience: isFragile ? 20 : 60,
+                fragile: isFragile,
+            },
+            ...entries,
+        ]
+        : entries;
+    const lines = all.map(e => {
         const flag = e.fragile ? ' ⚠' : '';
         return (`${e.name.padEnd(28)} CSS: ${e.css.padEnd(50)} [${e.resilience}]${flag}\n` +
             `${''.padEnd(28)}      XPath: ${e.xpath}`);
